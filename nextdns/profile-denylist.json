@@ -1,0 +1,334 @@
+[
+  {
+    "id": "pagead.l.doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "dart.l.doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "app.adjust.com",
+    "active": true
+  },
+  {
+    "id": "analytics.twitter.com",
+    "active": true
+  },
+  {
+    "id": "amazon-adsystem.com",
+    "active": true
+  },
+  {
+    "id": "adservice.google.com",
+    "active": true
+  },
+  {
+    "id": "linktr.ee",
+    "active": true
+  },
+  {
+    "id": "universal-zinstant.api.zaloapp.com",
+    "active": true
+  },
+  {
+    "id": "zsp.zaloapp.com",
+    "active": true
+  },
+  {
+    "id": "channel-zinstant.api.zaloapp.com",
+    "active": true
+  },
+  {
+    "id": "zmdcdn.me",
+    "active": true
+  },
+  {
+    "id": "broadcast.api.zaloapp.com",
+    "active": true
+  },
+  {
+    "id": "stc-oa.zdn.vn",
+    "active": true
+  },
+  {
+    "id": "zagoo.zadn.vn",
+    "active": true
+  },
+  {
+    "id": "securepubads.g.doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "res-zalo.zadn.vn",
+    "active": true
+  },
+  {
+    "id": "stc-sp.zadn.vn",
+    "active": true
+  },
+  {
+    "id": "stc-fin.zdn.vn",
+    "active": true
+  },
+  {
+    "id": "fiza.ai",
+    "active": true
+  },
+  {
+    "id": "oa.zalo.me",
+    "active": true
+  },
+  {
+    "id": "sentry-mini.zalo.me",
+    "active": true
+  },
+  {
+    "id": "stc-zmp.zadn.vn",
+    "active": true
+  },
+  {
+    "id": "discovery.api.zaloapp.com",
+    "active": true
+  },
+  {
+    "id": "zalo.video",
+    "active": true
+  },
+  {
+    "id": "zalo.cloud",
+    "active": true
+  },
+  {
+    "id": "zagoo.vn",
+    "active": true
+  },
+  {
+    "id": "miniappstore.api.zalo.me",
+    "active": true
+  },
+  {
+    "id": "graph.zalo.me",
+    "active": true
+  },
+  {
+    "id": "zinst-stc.zdn.vn",
+    "active": true
+  },
+  {
+    "id": "video.zalo.me",
+    "active": true
+  },
+  {
+    "id": "opentracking.zalopay.vn",
+    "active": true
+  },
+  {
+    "id": "social.zalopay.vn",
+    "active": true
+  },
+  {
+    "id": "dns.webcake.io",
+    "active": true
+  },
+  {
+    "id": "mask.apple-dns.net",
+    "active": true
+  },
+  {
+    "id": "mask-api.icloud.com",
+    "active": true
+  },
+  {
+    "id": "doh.dns.apple.com.v.aaplimg.com",
+    "active": true
+  },
+  {
+    "id": "doh.dns.apple.com",
+    "active": true
+  },
+  {
+    "id": "apple-relay.fastly-edge.com",
+    "active": true
+  },
+  {
+    "id": "apple-relay.cloudflare.com",
+    "active": true
+  },
+  {
+    "id": "mask-canary.icloud.com",
+    "active": true
+  },
+  {
+    "id": "mask-h2.icloud.com",
+    "active": true
+  },
+  {
+    "id": "mask.icloud.com",
+    "active": true
+  },
+  {
+    "id": "dns.ladipage.com",
+    "active": true
+  },
+  {
+    "id": "connect.facebook.com",
+    "active": true
+  },
+  {
+    "id": "connect.facebook.net",
+    "active": true
+  },
+  {
+    "id": "eyep.blog",
+    "active": true
+  },
+  {
+    "id": "ecomobi.me",
+    "active": true
+  },
+  {
+    "id": "eonl.site",
+    "active": true
+  },
+  {
+    "id": "blogtin.org",
+    "active": true
+  },
+  {
+    "id": "ecomobi.click",
+    "active": true
+  },
+  {
+    "id": "ecomobi.blog",
+    "active": true
+  },
+  {
+    "id": "shope.ee",
+    "active": true
+  },
+  {
+    "id": "www.googletagservices.com",
+    "active": true
+  },
+  {
+    "id": "www.googleadservices.com",
+    "active": true
+  },
+  {
+    "id": "video-ad-stats.googlesyndication.com",
+    "active": true
+  },
+  {
+    "id": "v.jwpcdn.com",
+    "active": true
+  },
+  {
+    "id": "tpc.googlesyndication.com",
+    "active": true
+  },
+  {
+    "id": "s0.2mdn.net",
+    "active": true
+  },
+  {
+    "id": "redirector.gvt1.com",
+    "active": true
+  },
+  {
+    "id": "pubads.g.doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "prod.spotify.map.fastlylb.net",
+    "active": true
+  },
+  {
+    "id": "partner.googleadservices.com",
+    "active": true
+  },
+  {
+    "id": "pagead46.l.doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "pagead2.googlesyndication.com",
+    "active": true
+  },
+  {
+    "id": "omaze.com",
+    "active": true
+  },
+  {
+    "id": "media-match.com",
+    "active": true
+  },
+  {
+    "id": "js.moatads.com",
+    "active": true
+  },
+  {
+    "id": "gtssl2-ocsp.geotrust.com",
+    "active": true
+  },
+  {
+    "id": "googleadservices.com",
+    "active": true
+  },
+  {
+    "id": "googleads.g.doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "ds.serving-sys.com",
+    "active": true
+  },
+  {
+    "id": "doubleclick.net",
+    "active": true
+  },
+  {
+    "id": "d3rt1990lpmkn.cloudfront.net",
+    "active": true
+  },
+  {
+    "id": "d2gi7ultltnc2u.cloudfront.net",
+    "active": true
+  },
+  {
+    "id": "core.insightexpressai.com",
+    "active": true
+  },
+  {
+    "id": "content.bitsontherun.com",
+    "active": true
+  },
+  {
+    "id": "bs.serving-sys.com",
+    "active": true
+  },
+  {
+    "id": "bounceexchange.com",
+    "active": true
+  },
+  {
+    "id": "b.scorecardresearch.com",
+    "active": true
+  },
+  {
+    "id": "analytics.spotify.com",
+    "active": true
+  },
+  {
+    "id": "ads-fa.spotify.com",
+    "active": true
+  },
+  {
+    "id": "adclick.g.doublecklick.net",
+    "active": true
+  },
+  {
+    "id": "ads.tiktok.com",
+    "active": true
+  }
+]

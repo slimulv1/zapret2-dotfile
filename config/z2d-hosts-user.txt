@@ -1,0 +1,2 @@
+# rong mot co y — khong duoc them domain o day
+# rong = khong co menh de loc = desync MOI ket noi 80/443

@@ -1,0 +1,31 @@
+#!/bin/sh
+# z2d-sysctl-apply — tra lai IPT_SYSCTL neu bi ghi de, roi nap lai sysctl.
+#
+# CAI DUOC BOI:
+#   - /etc/pacman.d/hooks/z2d-pacman-ufw.hook   (sau moi giao dich pacman)
+#   - /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
+#   - thu cong
+#
+# IDEMPOTENT: neu moi dung thi khong ghi gi, khong in gi, thoat 0.
+#
+# Vi sao 2 lop: IPT_SYSCTL trong /etc/default/ufw la lop phu "ufw reload tu
+# CLI" (khong di qua systemd). Drop-in systemd phu "moi lan ufw bat len".
+# Hook pacman phu "nang cap ufw ghi de /etc/default/ufw".
+DEST=/etc/ufw/z2d-sysctl.conf
+
+# 1. tra con tro
+if [ -f /etc/default/ufw ]; then
+  if grep -q "^IPT_SYSCTL=$DEST" /etc/default/ufw 2>/dev/null; then
+    :
+  elif grep -q "^IPT_SYSCTL=" /etc/default/ufw 2>/dev/null; then
+    sed -i "s|^IPT_SYSCTL=.*|IPT_SYSCTL=$DEST|" /etc/default/ufw
+  else
+    printf 'IPT_SYSCTL=%s\n' "$DEST" >> /etc/default/ufw
+  fi
+fi
+
+# 2. nap lai gia tri
+if [ -f "$DEST" ]; then
+  sysctl --system >/dev/null 2>&1 || true
+fi
+exit 0

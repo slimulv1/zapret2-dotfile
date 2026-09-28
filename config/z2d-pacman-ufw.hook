@@ -1,0 +1,31 @@
+# z2d-pacman-ufw.hook — sau mọi giao dịch pacman đụng gói ufw, tra lại IPT_SYSCTL
+#
+# VÌ SAO CẦN
+#   /etc/default/ufw KHÔNG nằm trong danh sách backup của gói ufw (đọc
+#   /var/lib/pacman/local/ufw-*/desc — không có khoá %BACKUP%). Nâng cấp ufw
+#   sẽ GHI ĐÈ dòng `IPT_SYSCTL=` về /etc/ufw/sysctl.conf, và tệp đó MÂU THUẪN
+#   thiết kế ở 2 khoá (default.rp_filter=1 thay vì 2; all.log_martians=0
+#   thay vì 1). Không có cơ chế nào báo cho biết.
+#
+#   Đo 28/09: sửa /usr/lib/ufw/ufw-init-functions thì `pacman -Qkk` báo 1 file
+#   altered; còn sửa /etc/default/ufw và /etc/ufw/ufw.conf thì vẫn 0 — tệp
+#   cấu hình được miễn kiểm. Nghĩa là chính pacman cũng không phát hiện.
+#
+# TẠI SAO IM LẶNG
+#   Helper idempotent: nếu dòng đã đúng thì không ghi gì, và sysctl nạp xong
+#   không in ra đâu. Nên các giao dịch không liên quan không để lại dấu vết.
+#
+# CÁCH CÀI: install.sh tự chép, không cài tay.
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = ufw
+
+[Action]
+Description = Trỏ lại IPT_SYSCTL của ufw sang tệp sysctl của zapret2-dotfile
+Depends = ufw
+When = PostTransaction
+Exec = /usr/local/bin/z2d-sysctl-apply

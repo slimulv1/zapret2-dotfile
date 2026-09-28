@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# z2d-resolved.conf — cấu hình systemd-resolved cho tầng 2 (NextDNS).
+#
+# install.sh thay 785fad bằng ID profile của bạn rồi ghi vào
+# /etc/systemd/resolved.conf.
+#
+# VÌ SAO MỖI DÒNG ĐỀU CÓ LÝ DO
+#   DNS / FallbackDNS : 4 địa chỉ NextDNS (2 IPv4 + 2 IPv6). Ghi đủ 4 để khi
+#                       một cái hỏng máy còn 3 cái. Chỉ cần NextDNS — không
+#                       có Cloudflare hay Google, vì chúng không lọc.
+#   DNSOverTLS=yes     : bắt buộc. DNS thường cổng 53 thì nhà mạng tiêm được
+#                       (đo 28/09: FPT trả 127.0.0.1 cho domain bị chặn).
+#                       DoT cổng 853 mã hoá nên không bị tiêm.
+#   LLMNR=no           : tắt để không hỏi dò tên miền trong mạng LAN.
+#   MulticastDNS=no    : như trên.
+#   DNSSEC=allow-downgrade : NextDNS ký DNSSEC nhưng đường cỏ đôi khi hỏng;
+#                       hạ cấp còn hơn mất DNS hoàn toàn.
+#   DNSStubListener=yes: bắt buộc — /etc/resolv.conf trỏ vào stub 127.0.0.53.
+#   ReadEtcHosts=yes   : giữ /etc/hosts có tác dụng.
+
+[Resolve]
+DNS=45.90.28.0#785fad.dns.nextdns.io
+DNS=2a07:a8c0::#785fad.dns.nextdns.io
+DNS=45.90.30.0#785fad.dns.nextdns.io
+DNS=2a07:a8c1::#785fad.dns.nextdns.io
+FallbackDNS=45.90.28.0#785fad.dns.nextdns.io
+FallbackDNS=2a07:a8c0::#785fad.dns.nextdns.io
+FallbackDNS=45.90.30.0#785fad.dns.nextdns.io
+FallbackDNS=2a07:a8c1::#785fad.dns.nextdns.io
+DNSOverTLS=yes
+LLMNR=no
+MulticastDNS=no
+DNSSEC=allow-downgrade
+Cache=yes
+DNSStubListener=yes
+ReadEtcHosts=yes

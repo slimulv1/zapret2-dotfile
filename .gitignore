@@ -1,0 +1,42 @@
+# ============================================================================
+#  .gitignore — thứ KHÔNG được đẩy lên GitHub
+# ============================================================================
+
+# ---- BÍ MẬT --------------------------------------------------------------
+# API key của NextDNS: đọc và GHI được profile trên đám mây.
+# Lưu ở /root/.config/nextdns/api.key, quyền 600 — NGOÀI repo.
+#
+# Repo này private KHÔNG phải lý do bỏ qua mục này. Repo private vẫn hiện với
+# người được mời cộng tác, với quản trị viên tổ chức, và có thể bị chuyển sang
+# public bằng một cú nhấp. API key là THÔNG TIN ĐĂNG NHẬP — mất nó thì kẻ khác
+# sửa được danh sách chặn DNS của bạn. Dữ liệu profile trong nextdns/ KHÔNG
+# cần key mới đọc được, nên không có lý do gì để chôn key vào đây.
+*api-key*
+*api_key*
+*API_KEY*
+*.nmconnection
+*.psk
+secrets.env
+.nextdns-key
+
+# ---- ẢNH CHỤP MÁY CỤ THỂ ------------------------------------------------
+# .nmconnection chứa mật khẩu Wi-Fi (psk=...). Quét bằng user thường báo "sạch"
+# chỉ vì file mode 600 root — đó là âm tính giả, không phải an toàn.
+*Preferences*
+*Cookies*
+
+# ---- KHÔNG TÁI TẠO ĐƯỢC --------------------------------------------------
+# Bản sao lưu thật nằm ở /var/backups/zapret2-dotfile/ — ngoài repo.
+*.tar.gz
+*.bak
+*.bak.*
+*.old
+*.saved
+*.log
+*.tmp
+
+# ---- RÁC -----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*~
