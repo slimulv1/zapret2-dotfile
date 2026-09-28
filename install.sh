@@ -15,6 +15,9 @@
 set -uo pipefail
 
 REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Đường dẫn TUYỆT ĐỐI của chính script này. Bước 9 đọc lại tệp để tự suy ra số
+# mục kiểm chứng; ghi cứng "install.sh" sẽ vỡ ngay khi file bị đổi tên.
+SELF="$REPO_DIR/$(basename "${BASH_SOURCE[0]}")"
 CONF="$REPO_DIR/config"
 BACKUP=/var/backups/zapret2-dotfile
 Z2D_SYSCTL=/etc/ufw/z2d-sysctl.conf
@@ -29,7 +32,8 @@ ZAPRET_REPO=https://github.com/bol-van/zapret2
 #   (2) Master đi thì không kiểm soát được. Đã thử: HEAD 2026-09-18 vẫn ổn,
 #       nhưng đổi cấu trúc thì không có gì chặn. Ghim tag đã đo.
 #   Tag v1.0.5.2 (6b6c63e, 2026-09-15) đã kiểm thật: có nfq2/ với 29 file .c,
-#   8 khoá NFQWS2_ trong config.default, `make all` ra nfq2/nfqws2 chạy được.
+#   8 khoá NFQWS2_ trong config.default, `make systemd` ra nfq2/nfqws2 chạy được
+#   (có sd_notify — xem giải thích ở bước 3).
 ZAPRET_TAG=v1.0.5.2
 
 ND_ID=""; DRY=0; ACTION=install
@@ -155,7 +159,7 @@ uninstall() {
       ok "đã xoá $n_del/16 đặc tả rule"
     else
       warn "chỉ xoá được $n_del/16 đặc tả rule"
-      warn "kiểm tay:  ufw status numbered   (còn dòng nào ghi 53, 853 hay 1714:1764 là sót)"
+      warn "kiểm tay: ufw status numbered — còn dòng nào ghi 53, 853 hay 1714:1764 là sót)"
     fi
   fi
 
@@ -226,7 +230,7 @@ uninstall() {
     if [ "$n_res" = 1 ]; then
       ok "resolv.conf → stub · ufw đã nạp lại"
     else
-      warn "resolv.conf CHƯA trỏ lại stub — kiểm:  readlink -f /etc/resolv.conf"
+      warn "resolv.conf chưa trỏ lại stub — kiểm: readlink -f /etc/resolv.conf"
     fi
   fi
 
@@ -238,7 +242,7 @@ uninstall() {
   else
     warn "Xong, nhưng KHÔNG có $BACKUP để đối chiếu — gỡ xong không còn bản sao"
   fi
-  say "  nếu DNS vẫn lỗi:  nmcli con mod '<tên profile>' ipv4.ignore-auto-dns no ipv6.ignore-auto-dns no"
+  say "  nếu DNS vẫn lỗi: nmcli con mod '<tên profile>' ipv4.ignore-auto-dns no ipv6.ignore-auto-dns no"
   exit 0
 }
 
@@ -391,23 +395,44 @@ nd_key_path() {
   return 1
 }
 
-# nd_json <tệp> <biểu thức python> — đọc 1 trường JSON, không có python3 thì
-# bỏ trống. Chỉ dùng cho phần BÁO TÌNH TRẠNG; phần quyết định (404 hay không)
-# chỉ cần HTTP code nên không phụ thuộc trình đọc JSON.
-nd_json() {
-  python3 - "$1" "$2" <<'PY' 2>/dev/null || true
+# Đọc JSON theo ĐƯỜNG DẪN, không dùng eval.
+#
+#   nd_get   <tệp> <a.b.c>   in giá trị (rỗng nếu không có)
+#   nd_count <tệp> <a.b>     in số phần tử của mảng (0 nếu không có)
+#   nd_flag  <tệp> <a.b>     in "bat" nếu giá trị ĐÚNG, "tat" nếu sai
+#
+# Bản đầu truyền vào một BIỂU THỨC python rồi `eval` nó. Hiện tại không có dữ
+# liệu người dùng nào chạm tới eval — toàn bộ chuỗi truyền vào đều là hằng số
+# viết trong chính script này. Nhưng `eval` trong script chạy dưới quyền root
+# thì không đáng giữ, và người đọc phải tự chứng minh điều đó mỗi lần sửa.
+# Ở đây chỉ cần 3 thao tác, nên làm thẳng cho rõ.
+_nd_py() { # _nd_py <tệp> <chế độ> <đường dẫn>
+  python3 - "$1" "$2" "$3" <<'NDJSON' 2>/dev/null || true
 import json, sys
-d = json.load(open(sys.argv[1])).get('data') or {}
-try: v = eval(sys.argv[2], {'d': d, 'len': len})
-except Exception: v = ''
-print('' if v is None else v)
-PY
+try:
+    cur = json.load(open(sys.argv[1])).get('data') or {}
+except Exception:
+    print(''); raise SystemExit
+for k in filter(None, sys.argv[3].split('.')):
+    if not isinstance(cur, dict) or k not in cur:
+        cur = None; break
+    cur = cur[k]
+mode = sys.argv[2]
+if cur is None:        out = ''
+elif mode == 'count': out = str(len(cur)) if hasattr(cur, '__len__') else ''
+elif mode == 'flag':  out = 'bat' if cur else 'tat'
+else:                 out = cur if isinstance(cur, str) else ''
+print(out)
+NDJSON
 }
+nd_get()   { _nd_py "$1" get   "$2"; }
+nd_count() { _nd_py "$1" count "$2"; }
+nd_flag()  { _nd_py "$1" flag  "$2"; }
 
 # nd_check — gọi sau khi đã kiểm định dạng ID. Chết (die) nếu ID sai; mọi
 # trường hợp không kiểm được thì chỉ cảnh báo, không chặn cài.
 nd_check() {
-  local kf body code name dn al bl sec
+  local kf body code name dn al bl
 
   command -v curl >/dev/null 2>&1 || {
     warn "không có curl — BỎ QUA kiểm ID NextDNS. Nếu ID sai, mọi tầng vẫn chạy nhưng không lọc."
@@ -417,8 +442,8 @@ nd_check() {
   if ! kf=$(nd_key_path); then
     warn "không tìm thấy API key NextDNS — BỎ QUA kiểm ID."
     warn "ID sai sẽ không báo lỗi, chỉ chạy nhưng không lọc."
-    warn "Đặt key ở $HOME/.config/nextdns/api.key (quyền 600), hoặc dùng --nd-key /đường/dẫn,"
-    warn "rồi chạy lại để có kiểm. Kiểm tay:  dig +short <một tên miền profile của bạn chặn>"
+    warn "Đặt key ở /root/.config/nextdns/api.key (quyền 600), hoặc dùng --nd-key /đường/dẫn,"
+    warn "rồi chạy lại để có kiểm. Kiểm tay: dig +short <một tên miền profile của bạn chặn>"
     return 0
   fi
 
@@ -444,34 +469,34 @@ nd_check() {
        dùng API key của chính profile đó." ;;
     403) rm -f "$body"
         warn "API key trong $kf bị NextDNS từ chối (403) — BỎ QUA kiểm ID."
-        warn "Kiểm tay:  dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
+        warn "Kiểm tay: dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
     "")  rm -f "$body"
         warn "không gọi được api.nextdns.io (mất mạng, hoặc bị chặn) — BỎ QUA kiểm ID."
-        warn "Cài xong nhớ kiểm tay:  dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
+        warn "Cài xong nhớ kiểm tay: dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
     *)   rm -f "$body"
         warn "API trả HTTP $code lạ (thường là 429 quá nhiều request) — BỎ QUA kiểm ID."
-        warn "Kiểm tay:  dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
+        warn "Kiểm tay: dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
   esac
 
   # Tới đây là ID thật. Báo tình trạng — đây là thứ mà bản cũ thiếu hẳn:
   # người dùng không có cách nào biết tầng 2 có thật sự lọc không.
-  name=$(nd_json "$body" 'd.get("name","")')
-  dn=$(nd_json "$body" 'len(d.get("denylist",[]))')
-  al=$(nd_json "$body" 'len(d.get("allowlist",[]))')
-  bl=$(nd_json "$body" 'len(d.get("privacy",{}).get("blocklists",[]))')
+  name=$(nd_get   "$body" name)
+  dn=$(nd_count   "$body" denylist)
+  al=$(nd_count   "$body" allowlist)
+  bl=$(nd_count   "$body" privacy.blocklists)
   ok "profile NextDNS: ${name:-?} (ID $ND_ID)"
   ok "trên đám mây: $bl blocklist · $dn mục chặn · $al mục cho qua"
 
   # Hai công tắc này quyết định gần như hết kết quả. Tắt thì tầng 2 vẫn
   # "chạy" nhưng phần lớn chặn biến mất — và đó cũng là kiểu hỏng im lặng.
   #
-  # nd_json trả "tắt" KHI công tắc tắt, rỗng khi công tắc bật. Phải cảnh báo
-  # lúc CHUỖI CÓ NỘI DUNG. Bản đầu viết [ -z ... ] — tức cảnh báo đúng lúc
-  # mọi thứ ổn và im lặng đúng lúc hỏng. Đảo điều kiện là cảnh báo hỏng nhất,
-  # vì nó dạy người đọc bỏ qua cảnh báo.
+  # nd_flag in "bat" khi công tắc BẬT, "tat" khi TẮT. Phải cảnh báo khi nó là
+  # "tat". Bản đầu kiểm [ -z ] trên chuỗi rỗng-mặc-định-khi-bật — tức cảnh
+  # báo đúng lúc mọi thứ ổn và im lặng đúng lúc hỏng. Đảo điều kiện là cảnh báo
+  # hỏng nhất, vì nó dạy người đọc bỏ qua cảnh báo.
   for sw in aiThreatDetection threatIntelligenceFeeds; do
-    sec=$(nd_json "$body" '"tắt" if not d.get("security",{}).get("'"$sw"'") else ""')
-    [ -n "$sec" ] && warn "công tắc $sw đang TẮT — nhiều trang sẽ không bị chặn"
+    [ "$(nd_flag "$body" "security.$sw")" = tat ] \
+      && warn "công tắc $sw đang TẮT — nhiều trang sẽ không bị chặn"
   done
   rm -f "$body"
   return 0
@@ -507,19 +532,6 @@ need_pkgs() {
   ok "đã cài: ${miss[*]}"
 }
 
-# need_libs <thư viện> <gói>… — cài gói CHỈ khi thư viện thật sự thiếu.
-# nfqws2 nạp 5 thư viện; thiếu thì build vẫn xong nhưng service không lên, và
-# lỗi hiện ra là "error while loading shared libraries" — khó đoán nguyên nhân.
-need_libs() {
-  local lib p miss=()
-  while [ $# -gt 0 ]; do
-    lib=$1; p=$2; shift 2
-    # ldconfig -p là nguồn chuẩn; duyệt /usr/lib cũng được nhưng dễ sót.
-    ldconfig -p 2>/dev/null | grep -qF "$lib" || miss+=("$p")
-  done
-  [ ${#miss[@]} -eq 0 ] && return 0
-  need_pkgs "${miss[@]}"
-}
 
 # =============================================================================
 # Đường GỠ chạy ở đây — sau TẤT CẢ định nghĩa hàm, trước bước 1.
@@ -552,15 +564,54 @@ step "2/9 · SAO LƯU VÀO $BACKUP"
 if [ "$DRY" = 1 ]; then
   ok "[dry] sẽ ghi đè $BACKUP"
 else
-  st=$(mktemp -d /var/backups/.z2d.XXXXXX)
+  st=$(mktemp -d /var/backups/.z2d.XXXXXX) \
+    || die "không tạo được thư mục tạm trong /var/backups — hãy kiểm tra dung lượng và quyền"
+  # `mktemp` hỏng mà không kiểm thì `st` RỖNG, và `mkdir -p "$st/etc/..."` sẽ
+  # tạo nhầm trong chính /etc. Lỗi này bị che vì `mkdir` chạy thành công.
+  #
+  # Dọn thư mục tạm khi chết giữa chừng: `die` ở bước sao lưu / tar xảy ra
+  # TRƯỚC khi `mv "$st" "$BACKUP"`, nên mỗi lần chết là thêm một thư mục rác
+  # trong /var/backups. Sau khi `mv` xong, $st không còn tồn tại ⇒ trap vô hại.
+  #   CHỈ xoá khi tên khớp ĐÚNG mẫu của mktemp — `rm -rf` với biến rỗng là
+  #   bi kịch, nên không được bỏ chặt kiểm tra này.
+  st_gc() { case "${st:-}" in /var/backups/.z2d.*) rm -rf -- "$st" ;; esac; }
+  trap st_gc EXIT
   mkdir -p "$st/etc/systemd/system/ufw.service.d" "$st/etc/sysctl.d" \
            "$st/etc/ufw" "$st/etc/default" "$st/etc/pacman.d/hooks" "$st/opt/zapret2"
+  # BẢN ĐẦU NUỐT LỖI Ở ĐÂY, VÀ ĐÂY CHÍNH LÀ CHỖ NGUY HIỂM NHẤT.
+  #   `[ -e "$f" ] && cp ... || true` — `|| true` bắt cả hai ca: file không tồn
+  #   tại (vô hại) VÀ cp hỏng (mất tệp backup mà không ai biết). Rồi
+  #   `--uninstall` xoá hẳn những tệp không có trong backup ⇒ cài xong, gỡ là
+  #   MẤT luôn không thể quay lại.
+  #   Nên: tệp có thật mà cp hỏng thì CHẾT, kèm tên tệp.
+  n_bk=0 n_bkbad=0
   for f in /etc/systemd/resolved.conf /etc/sysctl.d/60-z2d-hardening.conf \
            /etc/ufw/sysctl.conf /etc/ufw/z2d-sysctl.conf /etc/default/ufw \
            /etc/nftables.conf /etc/pacman.d/hooks/z2d-pacman-ufw.hook; do
-    [ -e "$f" ] && cp -a --parents "$f" "$st/" 2>/dev/null || true
+    [ -e "$f" ] || continue                       # chưa có thì không cần lưu
+    if cp -a --parents "$f" "$st/" 2>/dev/null; then
+      n_bk=$((n_bk + 1))
+    else
+      bad "sao lưu hỏng: $f — dừng, chưa sửa gì trên máy"
+      n_bkbad=1
+    fi
   done
-  cp -a /etc/systemd/system/ufw.service.d/*.conf "$st/etc/systemd/system/ufw.service.d/" 2>/dev/null || true
+  # Drop-in của ufw: KHÔNG dùng `|| true`, vì glob không khớp thì hợp lệ (chưa
+  # có drop-in nào) nhưng cp hỏng thì không — nên phân biệt bằng cách xem có
+  # file nào khớp glob hay không.
+  shopt -s nullglob
+  ufw_dropins=(/etc/systemd/system/ufw.service.d/*.conf)
+  shopt -u nullglob
+  if [ "${#ufw_dropins[@]}" -gt 0 ]; then
+    if ! cp -a "${ufw_dropins[@]}" "$st/etc/systemd/system/ufw.service.d/" 2>/dev/null; then
+      bad "sao lưu drop-in ufw.service.d hỏng — dừng"
+      n_bkbad=1
+    else
+      n_bk=$((n_bk + ${#ufw_dropins[@]}))
+    fi
+  fi
+  [ "$n_bkbad" -eq 0 ] || die "sao lưu chưa đủ — KHÔNG tiếp tục, vì uninstall sẽ mất tệp không sao lưu"
+  ok "sao lưu $n_bk tệp cấu hình"
   if [ -d "$ZAPRET_DIR" ]; then
     cp -a "$ZAPRET_DIR/config" "$st/opt/zapret2/" || die "sao lưu config zapret2 thất bại"
     cp -a "$ZAPRET_DIR/ipset"  "$st/opt/zapret2/" || die "sao lưu ipset zapret2 thất bại"
@@ -570,8 +621,10 @@ else
   ufw status numbered > "$st/ufw-numbered.txt" 2>/dev/null || true
   nft list ruleset   > "$st/nft-ruleset.txt"   2>/dev/null || true
   { echo "Sao lưu chuẩn — $(date -Is)"
-    echo "Phục hồi:  sudo bash install.sh --uninstall"; } > "$st/BAO-GHI.txt"
-  rm -rf "$BACKUP"; mkdir -p "$(dirname "$BACKUP")"; mv "$st" "$BACKUP"
+    echo "Phục hồi: sudo bash install.sh --uninstall"; } > "$st/BAO-GHI.txt"
+  rm -rf "$BACKUP"; mkdir -p "$(dirname "$BACKUP")"; mv "$st" "$BACKUP" \
+    || die "không chuyển được $st thành $BACKUP — bản sao lưu cũ đã bị xoá, kiểm $st"
+  trap - EXIT   # $st đã thành $BACKUP; tắt trap dọn để không xoá nhầm bản sao lưu
   ok "đã ghi $BACKUP ($(find "$BACKUP" -type f | wc -l) file)"
 fi
 
@@ -641,16 +694,19 @@ else
   # Đã cài ở bước 1 vì cần cho build. Ở đây chỉ XÁC NHẬN: nếu gói lỡ bị gỡ
   # giữa hai lúc, service sẽ chết lúc start với "error while loading shared
   # libraries" — lỗi không nói ra nguyên nhân.
-  # Tên biến khác `miss` vì `miss` đã là MẢNG trong need_pkgs/need_libs; dùng
-  # lại ở đây khiến shellcheck báo SC2178 và dễ gây lỗi khi sửa tiếp.
+  # Tên biến khác `miss` vì `miss` đã là MẢNG trong need_pkgs; dùng lại ở đây
+  # khiến shellcheck báo SC2178 và dễ gây lỗi khi sửa tiếp.
   n_lib=0; ten_lib=""
   for lib in libnetfilter_queue.so.1 libnfnetlink.so.0 libmnl.so.0 \
              libluajit-5.1.so.2 libz.so.1; do
     ldconfig -p 2>/dev/null | grep -qF "$lib" || { n_lib=$((n_lib+1)); ten_lib="$ten_lib $lib"; }
   done
-  [ "$n_lib" -eq 0 ] && ok "thư viện lúc chạy: đủ 5" \
-    || die "thiếu thư viện lúc chạy:$ten_lib
+  if [ "$n_lib" -eq 0 ]; then
+    ok "thư viện lúc chạy: đủ 5"
+  else
+    die "thiếu thư viện lúc chạy:$ten_lib
        sudo pacman -S libnetfilter_queue libnfnetlink libmnl luajit zlib"
+  fi
 
   # ---- 5. SYSTEMD UNIT ----
   # Bản đầu KHÔNG copy unit, chỉ gọi `systemctl enable`/`restart`. Trên máy mới
@@ -719,9 +775,17 @@ else
   # chấp nhận IPv4 CIDR · IPv6 CIDR · IPv6 đơn (::1)
   grep -qvE '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$|^[0-9a-fA-F:]+(/[0-9]{1,2})?$' \
     "$ZAPRET_DIR/ipset/zapret-hosts-user-exclude.txt" && die "exclude có dòng không phải địa chỉ"
-  ok "10 khoá + NFQWS2_OPT · danh sách rỗng · $n_ex dải loại trừ"
+  # Đếm khoá TỪ TỆP. Bản đầu viết cứng "10 khoá" rồi thêm 2 khoá (DISABLE_IPV6,
+  # FLOWOFFLOAD) mà quên sửa con số — thêm xong vẫn in 10 trong khi tệp có 12.
+  n_khoa=$(grep -cvE '^[[:space:]]*(#|$)' "$CONF/z2d-zapret2.keys")
+  ok "$n_khoa khoá + NFQWS2_OPT · danh sách rỗng · $n_ex dải loại trừ"
 
-  systemctl enable zapret2 >/dev/null 2>&1 || true
+  # KHÔNG nuốt lỗi: enable hỏng thì dịch vụ chạy được BÂY GIỜ nhưng mất khi
+  # khởi động lại — máy lên mà không có tầng 1, và không có gì báo.
+  if ! systemctl enable zapret2 >/dev/null 2>&1; then
+    warn "không bật tự khởi động được zapret2 — sau khi reboot, tầng 1 sẽ không chạy"
+    warn "thử tay: sudo systemctl enable zapret2"
+  fi
   systemctl restart zapret2 || die "zapret2 không lên — journalctl -u zapret2 -n 30"
   for _ in $(seq 1 20); do systemctl is-active --quiet zapret2 && break; sleep 1; done
   systemctl is-active --quiet zapret2 || die "zapret2 vẫn không active"
@@ -784,25 +848,32 @@ else
   mapfile -t nm_list < <(nmcli -t -f UUID,TYPE con show 2>/dev/null)
   [ "${#nm_list[@]}" -gt 0 ] \
     || die "nmcli không trả về profile nào — không đặt được đường mặc định.
-       Kiểm:  nmcli -t -f UUID,TYPE con show"
+       Kiểm: nmcli -t -f UUID,TYPE con show"
   n_w=0 n_f=0
   for line in "${nm_list[@]}"; do
     cu=${line%%:*}; ct=${line#*:}
     [ -n "$cu" ] || continue
     case "$ct" in
       802-3-ethernet)
-        nmcli con modify "$cu" ipv4.route-metric 100 ipv6.route-metric 100 2>/dev/null \
-          && n_w=$((n_w + 1)) || bad "đặt route-metric cho cáp thất bại ($cu)" ;;
+        if nmcli con modify "$cu" ipv4.route-metric 100 ipv6.route-metric 100 2>/dev/null; then
+          n_w=$((n_w + 1))
+        else
+          bad "đặt route-metric cho cáp thất bại ($cu)"
+        fi ;;
       802-11-wireless)
-        nmcli con modify "$cu" ipv4.route-metric 50000 ipv6.route-metric 50000 2>/dev/null \
-          && n_f=$((n_f + 1)) || bad "đặt route-metric cho wifi thất bại ($cu)" ;;
+        if nmcli con modify "$cu" ipv4.route-metric 50000 ipv6.route-metric 50000 2>/dev/null; then
+          n_f=$((n_f + 1))
+        else
+          bad "đặt route-metric cho wifi thất bại ($cu)"
+        fi ;;
     esac
   done
   # Không có cáp thì cảnh báo, không chết: máy chỉ có wifi vẫn dùng được, chỉ là
   # không có gì để "dự phòng".
-  [ "$n_w" -gt 0 ] && ok "$n_w profile cáp: metric 100 (mặc định)" \
-                  || warn "không thấy profile cáp nào — wifi sẽ là đường mặc định"
-  [ "$n_f" -gt 0 ] && ok "$n_f profile wifi: metric 50000 (chỉ dự phòng)"
+  if [ "$n_w" -gt 0 ]; then ok "$n_w profile cáp: metric 100 (mặc định)"
+  else warn "không thấy profile cáp nào — wifi sẽ là đường mặc định"
+  fi
+  if [ "$n_f" -gt 0 ]; then ok "$n_f profile wifi: metric 50000 (chỉ dự phòng)"; fi
   # Cần reapply mới có hiệu lực: `nmcli con modify` chỉ ghi vào profile, route
   # đang chạy không đổi. Đo trên máy: modify xong, `ip route` vẫn ra metric cũ.
   for c in "${conns[@]}"; do
@@ -910,7 +981,12 @@ fi
 
 # =============================================================================
 step "9/9 · KIỂM CHỨNG CUỐI"
-if [ "$DRY" = 1 ]; then return 0 2>/dev/null || exit 0; fi
+# --dry DỪNG Ở ĐÂY, nhưng KHÔNG thoát: còn phải chạy tới khối in kết quả
+# cuối file để in "XEM XONG" và gợi ý câu lệnh chạy thật.
+# Bản đầu viết `return 0 2>/dev/null || exit 0` — ở top-level `return` là lệnh
+# không hợp lệ (nên phải chặn lỗi), và `exit 0` chạy được ⇒ --dry im lặng kết
+# thúc ở dòng "9/9", không có dòng nào báo đã xem xong. Nhánh `if [ "$DRY" = 1 ]`
+# ở cuối file trở thành code chết. Đo: --dry in "XEM XONG" 0 lần.
 nbad=0
 # BẪY ĐÃ DÍNH: (a) `grep -c ... || echo 0` in "0" RỒI trả 1 nên `||` in thêm
 # "0" nữa → "0\n0" và dòng báo LỆCH dù máy đúng; (b) lookbehind biến thiên
@@ -919,6 +995,14 @@ chk() {
   if [ "$2" = "$3" ]; then printf '  %sOK%s    %-32s %s\n' "$C_G" "$C_0" "$1" "$2"
   else printf '  %sLỆCH%s  %-32s thực tế=[%s] mong đợi=[%s]\n' "$C_R" "$C_0" "$1" "$2" "$3"; nbad=$((nbad+1)); fi
 }
+# Số mục SUY RA TỪ CHÍNH KHỐI NÀY, không viết cứng. Bản đầu ghi "14 mục", thêm
+# một mục thành 15 mà quên sửa — cùng kiểu lỗi với "10 khoá" ở bước 4.
+#   Khối chạy từ `step "9/9` đến hết file; mọi `chk` trong đó đều chạy đúng
+#   một lần (route-metric đã được rút về một lệnh chk ở trên).
+n_chk=$(awk '/^step "9\/[0-9]/{f=1} f' "$SELF" | grep -c '^ *chk ')
+if [ "$DRY" = 1 ]; then
+  say "    [dry] $n_chk mục kiểm chứng cuối — chạy thật mới kiểm"
+else
 chk "zapret2 active"      "$(systemctl is-active zapret2)" active
 chk "tiến trình nfqws2"   "$(pgrep -c nfqws2 || true)" 1
 chk "MODE_FILTER"         "$(grep -oP '^MODE_FILTER=\K.*' "$ZAPRET_DIR/config")" hostlist
@@ -933,6 +1017,32 @@ chk "ufw active"          "$(systemctl is-active ufw)" active
 chk "IPT_SYSCTL"          "$(grep -oP '(?<=^IPT_SYSCTL=).*' /etc/default/ufw)" "$Z2D_SYSCTL"
 chk "symlink boot sysctl" "$([ -L /etc/sysctl.d/60-z2d-hardening.conf ] && echo co || echo khong)" co
 chk "DNS còn hỏi được"    "$(resolvectl query --cache=no github.com >/dev/null 2>&1 && echo ok || echo loi)" ok
+# route-metric: buoc 5 vua dat, phai kiem lai. Cung loai hong "da dat nhung
+# dat sai" — im lang trong khi may sai thi moi nguy hiem.
+n_rm_bad=0 n_rm_seen=0
+while IFS=: read -r cu ct; do
+  [ -n "$cu" ] || continue
+  case "$ct" in
+    802-3-ethernet)  m=$(nmcli -g ipv4.route-metric con show "$cu" 2>/dev/null)
+                     n_rm_seen=$((n_rm_seen + 1))
+                     [ "$m" = 100 ]   || n_rm_bad=$((n_rm_bad + 1)) ;;
+    802-11-wireless) m=$(nmcli -g ipv4.route-metric con show "$cu" 2>/dev/null)
+                     n_rm_seen=$((n_rm_seen + 1))
+                     [ "$m" = 50000 ] || n_rm_bad=$((n_rm_bad + 1)) ;;
+  esac
+done < <(nmcli -t -f UUID,TYPE con show 2>/dev/null)
+# Gom vào MỘT lệnh chk chứ không viết if/else quanh chk: hai nhánh loại trừ
+# nhau khiến số dòng `chk` trong khối này nhiều hơn số mục thật sự chạy, và
+# bộ đếm bên dưới sẽ báo sai. Rút nhãn/giá trị ra biến, gọi chk đúng một lần.
+if [ "$n_rm_seen" -eq 0 ]; then
+  n_rm_lbl="route-metric (đọc được 0 profile)"
+  n_rm_val="không đọc được profile nào"; n_rm_exp="cần thấy cáp và wifi"
+else
+  n_rm_lbl="route-metric cáp 100 · wifi 50000"
+  n_rm_val="$n_rm_bad"; n_rm_exp=0
+fi
+chk "$n_rm_lbl" "$n_rm_val" "$n_rm_exp"
+fi
 say ""
 [ "$nbad" -eq 0 ] || die "$nbad mục LỆCH — không in HOÀN TẤT"
 
@@ -946,12 +1056,12 @@ say "─────────────────────────
 # tức "thành công giả" — đọc chữ đó là tin đã xong.
 if [ "$DRY" = 1 ]; then
   ok "XEM XONG — chưa thay đổi gì cả"
-  say "  chạy thật: sudo bash install.sh --nd-id $ND_ID"
+  say "  chạy thật         : sudo bash install.sh --nd-id $ND_ID"
 else
   ok "HOÀN TẤT — 3 tầng đã dựng và đã kiểm chứng"
-  say "  backup (duy nhất): $BACKUP"
+  say "  backup (duy nhất) : $BACKUP"
   say "  kiểm lại          : sudo bash test/t1-config.sh"
-  say "  gỡ ra            : sudo bash install.sh --uninstall"
+  say "  gỡ ra             : sudo bash install.sh --uninstall"
 fi
 say "──────────────────────────────────────────────"
 exit 0
