@@ -68,6 +68,11 @@ từng kết nối, rồi đo chiều dài đoạn TCP đầu tiên:
 phần định danh bảo mật, thì cả hai trả về `HTTP 200` — nhà mạng **không** chặn
 gì. Bật hay tắt tầng 1 thì kết quả y hệt nhau.
 
+Hai trang đó **không nằm trong danh sách chặn thủ công**. NextDNS trả về
+`Blocked by NextDNS: ai-threat-detection` và `threat-intelligence-feeds` — tức
+là do hai công tắc `aiThreatDetection` và `threatIntelligenceFeeds` đang bật
+trên đám mây. Đây là lý do một số trang bị chặn dù không hề có trong danh sách.
+
 **Phạm vi có giới hạn.** Tầng 1 chỉ xử lý cổng 80 và 443, và loại trừ 9 dải IP
 nội bộ (loopback, LAN, CGNAT, link-local).
 
@@ -105,7 +110,9 @@ Ba việc sau nằm ngoài máy, nên script không tự làm được.
 
 **Bật cấu hình tầng 2 trên đám mây.** Đây là bước dễ bỏ nhất, và bỏ thì mọi
 kiểm vẫn báo đạt — vì cấu hình sai nằm trên đám mây chứ không nằm trong máy.
-Cấu hình đang dùng được chép lại ở [`nextdns/README.md`](nextdns/README.md).
+Trong đó hai công tắc quyết định gần như hết kết quả: `aiThreatDetection` và
+`threatIntelligenceFeeds`, đều bật. Tắt chúng thì phần lớn chặn biến mất, còn
+danh sách chặn thủ công thì không đổi.
 
 **Đặt đường mặc định.** Hệ thống này chỉ được đo trên cáp, nhưng
 NetworkManager mặc định lại ưu tiên wifi, nên lưu lượng sẽ chạy nhầm qua
@@ -126,7 +133,6 @@ nào chặn riêng mà không chặn cả web. Để trình duyệt tự chọn 
 | [`docs/NETWORK-DESIGN.md`](docs/NETWORK-DESIGN.md) | Thiết kế chi tiết, kết quả đo, và những chỗ đã biết là chưa ổn |
 | [`docs/NGUOI-SUA.md`](docs/NGUOI-SUA.md) | Bẫy cần tránh khi sửa script trong repo này |
 | [`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md) | Ghim DoH cho Firefox và Chromium |
-| [`nextdns/README.md`](nextdns/README.md) | Ảnh chụp profile NextDNS |
 
 ## Về API key
 
