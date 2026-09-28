@@ -190,57 +190,63 @@ profile của bạn đang chặn:
 dig +short <tên miền đó>     # 0.0.0.0 là đúng · IP thật là đang hỏng
 ```
 
-**Đặt đường mặc định.** Khi cáp và wifi cùng mở, máy phải chọn lưu lượng đi đường
-nào. Linux so sánh bằng **metric**: số nhỏ hơn thì thắng.
+**Đặt đường mặc định.** Khi cáp và wifi cùng mở, máy phải tự chọn lưu lượng đi
+đường nào. Cách Linux quyết định rất đơn giản: mỗi đường mang một con số gọi là
+**metric**, và đường nào có số nhỏ hơn sẽ thắng.
 
-Trên máy này wifi là hotspot điện thoại. NetworkManager liên tục thử xem mỗi
-kết nối có ra được Internet thật không, rồi xếp hạng:
+Wifi trên máy này là hotspot điện thoại. NetworkManager liên tục thử xem mỗi
+kết nối có ra được Internet thật không, rồi xếp hạng từng đường:
 
 ```
-cáp   enp8s0   full       ra được Internet bình thường
-wifi  wlan0    limited    bị hạn chế
+cáp   enp8s0   full      ra được Internet bình thường
+wifi  wlan0    limited   bị hạn chế
 ```
 
-Theo tài liệu NetworkManager, **kết nối không ở trạng thái `full` bị cộng thêm
-20000 vào metric**. Đó là lý do wifi đặt 50000 mà bảng định tuyến lại ghi
-70000:
+Tài liệu NetworkManager nói rõ: kết nối không ở mức `full` sẽ bị **cộng thêm
+20000** vào metric. Nên con số ta tự đặt chưa phải số thật:
 
-| | đặt trong profile | metric thật |
+| | đặt trong profile | metric thật trong bảng định tuyến |
 |---|---|---|
 | cáp | 100 | 100 |
 | wifi | 50000 | 50000 **+ 20000** = 70000 |
 
-Cáp thắng, và thắng rộng.
+Cáp thắng, và thắng rộng — lưu lượng của bạn đi đường cáp, đúng ý.
 
-Một chỗ dễ đoán sai: phần 20000 đó **không** đến từ `autoconnect-priority`. Đảo
-priority của hai profile theo cả hai chiều thì metric không nhúc nhích. Nó đến
-từ kết quả kiểm tra kết nối, không liên quan gì tới priority.
+Chỗ dễ hiểu nhầm nhất là chỗ đó. Phần cộng 20000 **không** đến từ
+`autoconnect-priority`. Có thể kiểm điều đó: nếu nó đến từ priority thì hạ
+priority của wifi xuống sẽ thấy metric nhảy theo. Tôi đã đảo priority của hai
+profile theo cả hai chiều — metric không nhúc nhích. Nó đến từ kết quả kiểm tra
+kết nối, và chỉ biến mất khi NetworkManager xếp wifi lên `full`.
 
-Vì sao vẫn nên đặt? Để có hai lớp thay vì một. Nếu hotspot đổi thành WiFi nhà và
-NM xếp nó thành `full`, phần phạt 20000 biến mất; lúc đó wifi còn 50000, vẫn thua
-cáp. Còn nếu để trống, NM tự chọn 600 cho wifi, vẫn thua nhưng chỉ hơn 600, mong
-manh hơn nhiều.
-
-Đặt cho cả IPv4 lẫn IPv6:
+Vì vậy cứ đặt thẳng, cho cả IPv4 lẫn IPv6:
 
 ```bash
 nmcli connection modify "profile cáp"  ipv4.route-metric 100   ipv6.route-metric 100
 nmcli connection modify "profile wifi" ipv4.route-metric 50000 ipv6.route-metric 50000
 ```
 
-**Sửa xong phải reapply thì mới có hiệu lực.** `nmcli connection modify` một mình
-chỉ ghi vào profile, route đang chạy không đổi:
+Đặt xong **phải reapply thì mới có hiệu lực**. Lệnh `modify` chỉ ghi vào profile,
+còn route đang chạy thì không đổi — đây là chỗ hay tưởng đã xong trong khi chưa:
 
 ```bash
 nmcli device reapply enp8s0
 nmcli device reapply wlan0
 ```
 
-Kiểm lại:
+Xong thì xem lại:
 
 ```bash
 ip -4 route show default
 ```
+
+Phải thấy metric của cáp nhỏ hơn nhiều. Nếu thấy hai số bằng nhau hoặc bằng số
+cũ, nghĩa là quên reapply.
+
+Số 100 và 50000 không có ý nghĩa gì đặc biệt — chỉ cần cách nhau đủ xa. Nếu mai
+bạn đổi hotspot điện thoại thành WiFi nhà và nó lên `full`, phần cộng 20000 biến
+mất, nhưng 50000 vẫn thua 100. Còn nếu để trống, NetworkManager tự chọn 600 cho
+wifi (đo được 20600 = 600 + 20000), vẫn thua nhưng chỉ hơn có 600 — mong manh hơn
+nhiều.
 
 Phải thấy metric của cáp nhỏ hơn nhiều. Sửa profile mà quên reapply thì dòng này
 vẫn ra số cũ.
