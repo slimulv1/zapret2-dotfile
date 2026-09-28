@@ -1,40 +1,91 @@
 # zapret2-dotfile
 
-Hệ thống mạng 3 tầng cho CachyOS / Arch. Đây là **dotfile** — một nguồn sự
-thật duy nhất để dựng lại máy hoặc máy khác.
+Hệ thống mạng 3 tầng cho CachyOS / Arch.
+
+## Vấn đề cần giải
+
+Ở Việt Nam, phần lớn trang bị chặn bị chặn **theo tên miền**, không phải theo
+địa chỉ IP. Nghĩa là bạn có thể vào được IP đó từ bất kỳ máy nào, chỉ cần nhập
+đúng địa chỉ. Chặn kiểu đó không thể "vá" ở tầng thiết bị mạng — nó nằm ở chỗ
+hỏi tên miền.
+
+Hệ thống này giải quyết đúng chỗ đó: **mọi câu hỏi tên miền đều phải đi qua
+một nơi duy nhất**, và nơi đó quyết định cho đi hay chặn.
 
 ```
-tầng   làm gì                                    quyết định chặn?
-1      zapret2 desync gói để không bị DPI chặn    không — không chặn gì
-2      NextDNS qua DoT                            CÓ — tầng duy nhất
-2b     ufw tường DNS: chỉ cho hỏi NextDNS          không
-3      ufw INPUT deny, trừ KDE Connect            không
+   gói tin đi ra Internet
+            │
+   ┌────────▼──────────────┐
+   │  1 · zapret2          │  Sửa gói tin để bộ lọc (DPI) của nhà mạng
+   │  nfqws2               │  không đọc được tên miền. Không chặn gì cả.
+   └────────┬──────────────┘
+            │
+   ┌────────▼──────────────┐
+   │  2 · NextDNS          │  ◀ Chỗ DUY NHẤT quyết định chặn.
+   │  hỏi tên miền qua    │  Trả IP thật, hoặc chặn tuỳ danh sách trên
+   │  DoT · cổng 853      │  đám mây. Không có kết nối nào đi được tới tầng 1
+   └────────┬──────────────┘  nếu tên miền bị chặn ở đây.
+            │
+   ┌────────▼──────────────┐
+   │  2b · ufw tường DNS  │  Chỉ cho hỏi NextDNS, chặn mọi nơi hỏi DNS khác
+   │  16 rule              │  (cổng 53 và 853, cả IPv4 lẫn IPv6).
+   └────────┬──────────────┘  Đây là siết lại, không phải quyết định.
+            │
+   ┌────────▼──────────────┐
+   │  3 · ufw chặn vào máy │  Chặn mọi thứ từ ngoài vào, trừ KDE Connect
+   │  INPUT deny           │  trong mạng LAN. Chặn theo cổng, không quyết định.
+   └───────────────────────┘
 ```
 
-Chỉ tầng 2 quyết định trang nào bị chặn. Tầng 1 là lưới an toàn cho những gì
-tầng 2 chưa chặn tới.
+(DoT là DNS mã hoá chạy trên TLS, cổng 853. Cần mã hoá vì DNS thường cổng 53 thì
+nhà mạng tiêm được: đo được FPT trả `127.0.0.1` cho domain bị chặn.)
+
+Vì chỉ tầng 2 mới quyết định, nên **tầng 1 là lưới an toàn, không phải thứ đang
+cứu truy cập**. Nó sửa gói tin, chứ không tạo ra gói tin — một tên miền không
+phân giải được thì không có kết nối nào để mà sửa.
+
+Ví dụ cho ranh giới đó. Hai trang `viet69.be` và `erothots.co` bị
+NextDNS chặn. Nếu ép thẳng IP của chúng, giữ nguyên phần định danh bảo mật,
+thì cả hai trả về `HTTP 200` — nghĩa là nhà mạng **không** chặn gì, chỉ có
+NextDNS chặn. Bật hay tắt tầng 1 thì kết quả y hệt nhau.
+
+## Tầng 1 làm gì cụ thể
+
+DPI của nhà mạng đọc tên miền ở gói đầu tiên của mỗi kết nối HTTPS — gói đó
+chứa `ClientHello`, và tên miền nằm nguyên trong đó.
+
+Tầng 1 cắt gói đó làm hai đoạn, đoạn đầu chỉ mang **1 byte**. DPI cần nguyên
+`ClientHello` trong một gói để khớp mẫu — thấy 1 byte thì không mẫu nào khớp,
+nên nó cho qua. Máy đích thì vẫn ghép lại được, vì TCP chỉ cần đúng thứ tự byte.
+
+Đo trên máy thật, bằng cách xem chiều dài đoạn TCP đầu tiên của 5 kết nối:
+
+| | đoạn đầu tiên |
+|---|---|
+| tầng 1 bật | `[1, 1, 1, 1, 1]` byte |
+| tầng 1 tắt | `[1570, 1570, 1570, 1571, 1573]` byte |
+
+Phạm vi có giới hạn: chỉ cổng **80 và 443**, và loại trừ 9 dải IP nội bộ
+(loopback, LAN, CGNAT, link-local). Domain bị tầng 2 chặn trả về `127.0.0.1` —
+nằm trong 9 dải đó — nên lưu lượng của nó không bao giờ tới được tầng 1.
 
 ## Cài
 
 ```bash
-git clone <repo> && cd zapret2-dotfile
+git clone https://github.com/slimulv1/zapret2-dotfile.git
+cd zapret2-dotfile
 sudo bash install.sh --nd-id ABC123 --dry     # xem trước, không sửa gì
 sudo bash install.sh --nd-id ABC123           # cài thật
 ```
 
 `--nd-id` là ID profile NextDNS, 6 ký tự hex, lấy ở
-<https://my.nextdns.io> → Settings → General.
+<https://my.nextdns.io> → Settings → General. Máy chưa có zapret2 thì script tự
+cài luôn.
 
-Trên máy trống (chưa có zapret2) thì `install.sh` tự cài luôn.
+Trước khi sửa gì, script chụp lại trạng thái hiện tại vào
+`/var/backups/zapret2-dotfile/`. Chỉ có một bản, tên cố định, lần sau ghi đè.
 
-### Bước bắt buộc mà script không làm được
-
-Cấu hình tầng 2 nằm trên **đám mây**, không phải trong máy. Nếu bỏ qua thì
-tầng 2 không chặn gì và mọi kiểm vẫn báo đạt. Xem
-[`nextdns/README.md`](nextdns/README.md) — có ảnh chụp cấu hình thật để đối
-chiếu: **17 blocklist**, **83** mục denylist, **117** mục allowlist.
-
-### Kiểm
+Kiểm lại bằng:
 
 ```bash
 sudo bash test/t1-config.sh      # 37 mục, chỉ đọc — không sửa gì
@@ -43,73 +94,42 @@ sudo bash test/t1-config.sh      # 37 mục, chỉ đọc — không sửa gì
 Mất mạng thì:
 
 ```bash
-sudo bash install.sh --uninstall   # phục hồi từ backup chuẩn
+sudo bash install.sh --uninstall
 ```
 
-## Cấu trúc
+## Ba việc còn lại, phải tự làm
 
-```
-install.sh                  9 bước · --dry · --uninstall
-config/
-  z2d-zapret2.keys          10 khoá zapret2
-  z2d-zapret2-opt           chiến lược desync (khối nhiều dòng)
-  z2d-hosts-user.txt        RỔNG — điều kiện của việc bypass mọi 80/443
-  z2d-exclude.txt           9 dải IP miễn trừ
-  z2d-resolved.conf.template  {{ND_ID}} được thay lúc cài
-  z2d-sysctl.conf           18 khoá — nguồn sysctl DUY NHẤT
-  z2d-ufw-reapply-sysctl.conf  drop-in systemd
-  z2d-pacman-ufw.hook       hook pacman
-  z2d-sysctl-apply          helper 3 dòng
-nextdns/                    ảnh chụp profile NextDNS từ API
-docs/NETWORK-DESIGN.md      thiết kế + kết quả đo + bẫy đã dính
-test/t1-config.sh           37 mục kiểm chứng
-```
+Ba việc sau nằm ngoài máy, nên script không tự làm được.
 
-## Bốn điều cần biết trước khi sửa gì
+**Bật cấu hình tầng 2 trên đám mây.** Đây là bước dễ bỏ nhất, và bỏ thì mọi
+kiểm vẫn báo đạt — vì cấu hình sai nằm trên đám mây chứ không nằm trong máy.
+Cấu hình đang dùng được chép lại ở [`nextdns/README.md`](nextdns/README.md).
 
-**1. `/opt/zapret2/config` là script shell, không phải tệp keyfile.**
-Phải là `KEY=VALUE`. Viết `KEY = VALUE` thì bash hiểu thành lệnh `KEY`, zapret2
-không lên. Ngược lại `z2d-sysctl.conf` **là** keyfile nên có khoảng trắng là
-đúng. Hai kiểu khác nhau — đừng lấy khuôn của cái này cho cái kia.
+**Đặt đường mặc định.** Hệ thống này chỉ được đo trên cáp, nhưng
+NetworkManager mặc định lại ưu tiên wifi, nên lưu lượng sẽ chạy nhầm qua
+wifi. Cần tự đặt `ipv4.route-metric` cho từng profile. Lưu ý: hạ riêng metric của
+profile cáp thì vô dụng, vì NetworkManager cộng thêm 20000 vào metric của
+profile có `autoconnect-priority` thấp hơn.
 
-**2. `NFQWS2_OPT` là khối nhiều dòng.** `sed` chỉ thay dòng đầu sẽ làm các
-dòng sau trôi thành lệnh lạ. Phải xoá cả khối rồi chèn.
+**Ghim DoH cho trình duyệt.** Tường DNS chặn cổng 53 và 853, nhưng DoH (DNS
+mã hoá chạy trên HTTPS) lại dùng cổng 443 — cùng cổng với web, nên không có
+cách nào chặn riêng mà không chặn cả web. Để trình duyệt tự
+chọn provider thì nó đi vòng khỏi NextDNS. Cách làm:
+[`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md).
 
-**3. Danh sách user phải RỖNG.** Rỗng = không có mệnh đề lọc = desync mọi
-kết nối 80/443. Thêm một domain là chỉ còn desync domain đó.
+## Đọc thêm
 
-**4. Comment của rule ufw lưu dạng hex trong `user.rules`.**
-`comment=7a3264206e657874646e73203533` là `z2d nextdns 53`. Nên grep chữ `z2d`
-trong tệp **luôn ra 0 dòng** dù `ufw status` hiện đủ 20 rule. Mọi kiểm phải đi
-qua `ufw status`.
+| Tệp | Nội dung |
+|---|---|
+| [`docs/NETWORK-DESIGN.md`](docs/NETWORK-DESIGN.md) | Thiết kế chi tiết, kết quả đo, và những chỗ đã biết là chưa ổn |
+| [`docs/NGUOI-SUA.md`](docs/NGUOI-SUA.md) | Bẫy cần tránh khi sửa script trong repo này |
+| [`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md) | Ghim DoH cho Firefox và Chromium |
+| [`nextdns/README.md`](nextdns/README.md) | Ảnh chụp profile NextDNS |
 
-## Quy tắc khi viết hoặc sửa script trong đây
+## Về API key
 
-1. **Không in "HOÀN TẤT" khi chưa kiểm chứng.** Sai một chỗ thì dừng.
-2. **Không tin mã lỗi của lệnh** — đọc lại trạng thái sau khi ghi.
-3. **Không đếm số dòng để kết luận.** Kiểm từng rule, cả IPv4 lẫn IPv6.
-4. **Không nuốt lỗi trong backup.** `2>/dev/null` ở chỗ sao lưu đã từng làm
-   mất im lặng đúng tệp cần để quay lại.
-5. **Chỉ MỘT bản sao lưu**, tên cố định `/var/backups/zapret2-dotfile/`,
-   ghi đè. Không sinh bản thứ hai.
-6. **`--dry` không được sửa gì và không được in "HOÀN TẤT".**
-7. **Mọi phép đo phải được thử bằng cách tiêm lỗi thật.** Chạy một lần thấy
-   "đạt" là bằng không.
+Repo không chứa API key của NextDNS, dù dữ liệu profile đọc được mà không cần
+key. Repo private vẫn hiện với người được mời cộng tác, và chuyển sang public chỉ
+mất vài giây — mà key thì cho phép sửa cả danh sách chặn DNS.
 
-`docs/NETWORK-DESIGN.md` §9 liệt kê 13 bẫy đo đã dính — đọc trước khi viết
-bộ kiểm mới, phần lớn là do lỗi bộ đo chứ không phải lỗi hệ thống.
-
-## Ngoài phạm vi script
-
-- **Đường mặc định.** Thiết kế chỉ đo trên cáp. NetworkManager mặc định ưu
-  tiên wifi, nên phải tự đặt `ipv4.route-metric` cho từng profile.
-  Hạ metric của cáp một mình là vô dụng — NetworkManager cộng thêm 20000 vào
-  metric của profile có `autoconnect-priority` thấp hơn.
-- **Trình duyệt.** Tường DNS chặn cổng 53 và 853, nhưng DoH chạy trên cổng
-  **443** — không quy tắc nào chặn được nó mà không chặn cả web. Trình duyệt tự
-  bật DoH sẽ đi vòng qua NextDNS. Phải ghim URI DoH của NextDNS thủ công.
-  Với Firefox dùng `user.js` (đọc mỗi lần khởi động, không bị `prefs.js` ghi
-  đè) và `trr.mode=2` — **không** dùng `3` (bắt buộc DoT, hỏng là mất DNS) và
-  **không** dùng `5` (mặc định: có fallback nhưng không ghim provider).
-  Trên CachyOS `~/.config` chạy qua back-ovfs nên profile có **hai** lớp bền:
-  `<tên>-back-ovfs` và `<tên>-backup` — chỉ ghi một lớp thì mất sau reboot.
+Key đặt ở `/root/.config/nextdns/api.key`, quyền 600, ngoài repo.
