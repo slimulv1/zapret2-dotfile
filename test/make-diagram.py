@@ -57,54 +57,66 @@ def blank():
 def section(text):
     if out:
         blank()                       # tach phan cho de doc
+    # KHONG them dong trong o cuoi: layer() da them dong trong o dau moi tang.
+    # Them ca hai noi thì ra hai dong trong lien nhau.
     out.append('│' + put('  ' + text.upper(), INNER) + '│')
-    blank()
 
 
-CD = INNER - C_NUM - C_NAME - GAP      # do rong cot mo ta
+# [vong 36] XEP TEN LEN DONG RIENG, MO TA THUT XUONG DUOI.
+#
+#   Ban dau bo 3 COT NGANG: so | ten tang | mo ta. Hai cot "ten tang" va
+#   "mo ta" nam canh nhau, nen bat ky chu nao cung co the bi quy nham la cua
+#   tang ben canh. Vi du ro nhat: dong
+#       "  ◀ CHỗ DUY NHẤT QUYẾT ĐỊNH CHẶN"
+#   la tiep noi cua TANG 2 (NextDNS) nhung nam ngay sat dong
+#       "  2  TẦNG 1 · zapret2 · desync"
+#   o ngay duoi, nen doc nham sang tang 1 la hoan toan hop ly.
+#
+#   Cach chua: moi tang chi con MOT cot — ten tren dong, mo ta thut ben duoi,
+#   thut dung duoi chieu rong cua phan ten. Khong con hai cot nao nam canh
+#   nhau, nen khong con gi de nham nua.
+IND_BODY = '      '                  # thụt đầu dòng mô tả
+CD = INNER - W(IND_BODY)              # bề rộng cột mô tả
 
 
 def layer(num, name, desc):
-    out.append('│' + put('  ' + num, C_NUM) + put(name, C_NAME)
-               + ' ' * GAP + put(desc[0], CD) + '│')
-    for d in desc[1:]:
-        out.append('│' + ' ' * (C_NUM + C_NAME) + ' ' * GAP + put(d, CD) + '│')
-
-
-def note(text):
+    # DONG TRONG TRUỚC MỖI TẦNG — không có nó thì dòng cuối của tầng này
+    # dính ngay dòng tiêu đề của tầng sau, đọc lại thành một khối.
     blank()
-    out.append('│' + put('  ' + text, INNER) + '│')
+    out.append('│' + put('  ' + num + '  ' + name, INNER) + '│')
+    for d in desc:
+        out.append('│' + put(IND_BODY + d, INNER) + '│')
 
 
 section('Khi bạn mở một trang web')
-layer('1', 'TẦNG 2 · NextDNS · DoT', [
-    'Hỏi tên miền ở cổng 853. Trả IP thật,',
-    'hoặc chặn tuỳ danh sách trên đám mây.',
+layer('①', 'TẦNG 2 · NextDNS qua DoT', [
+    'Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn tuỳ',
+    'danh sách nằm trên đám mây của bạn.',
     '',
-    '◀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN',
-    'Nằm trên đám mây, không nằm trong máy.',
+    '◀ ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.',
+    'Danh sách chặn nằm trên đám mây chứ không nằm trong máy,',
+    'nên phần cài đặt bên dưới không tự làm được bước này.',
 ])
-layer('2', 'TẦNG 1 · zapret2 · desync', [
-    'Mở kết nối tới IP đó. Cắt gói đầu của',
-    'kết nối HTTPS thành hai đoạn, đoạn đầu',
-    'chỉ mang 1 byte. Bộ lọc của nhà mạng cần',
-    'nguyên gói để đọc tên miền nên không',
-    'khớp mẫu nào và cho qua.',
+layer('②', 'TẦNG 1 · zapret2 · desync', [
+    'Mở kết nối tới IP vừa nhận được. Cắt gói đầu của kết nối',
+    'HTTPS thành hai đoạn, đoạn đầu chỉ mang 1 byte. Bộ lọc của',
+    'nhà mạng cần nguyên gói đó để đọc tên miền, nên không khớp',
+    'mẫu nào và cho qua.',
     '',
-    'Không chặn gì cả — chỉ chống bị chặn.',
+    'Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên',
+    'miền bị chặn ở bước ① thì không có kết nối nào để mà sửa',
+    'ở bước ②.',
 ])
-note('Bị chặn ở bước 1 ⇒ không có kết nối nào để mà sửa ở bước 2.')
 
 section('Khi có ai gọi tới máy bạn')
-layer('3', 'TẦNG 3 · ufw · chặn INPUT', [
-    'Chặn mọi thứ đi vào máy, trừ KDE Connect',
-    'trong mạng LAN.',
+layer('③', 'TẦNG 3 · ufw · chặn INPUT', [
+    'Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.',
 ])
 
 section('Luôn luôn bật, mọi lúc mở máy')
-layer('4', 'TẦNG 2b · ufw · tường DNS', [
-    'Chỉ cho hỏi NextDNS ở cổng 53 và 853,',
-    'chặn mọi nơi hỏi DNS khác — cả IPv4 lẫn IPv6.',
+layer('④', 'TẦNG 2b · ufw · tường chặn DNS', [
+    'Chỉ cho phép hỏi NextDNS ở cổng 53 và 853, chặn mọi nơi hỏi',
+    'DNS khác — cả IPv4 lẫn IPv6.',
 ])
 
 out.append('└' + '─' * INNER + '┘')

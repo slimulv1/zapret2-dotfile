@@ -18,30 +18,34 @@ Hệ thống này gom mọi câu hỏi tên miền về một nơi duy nhất, v
 │                                                                                    │
 │  KHI BẠN MỞ MỘT TRANG WEB                                                          │
 │                                                                                    │
-│  1  TẦNG 2 · NextDNS · DoT     Hỏi tên miền ở cổng 853. Trả IP thật,               │
-│                                hoặc chặn tuỳ danh sách trên đám mây.               │
+│  ①  TẦNG 2 · NextDNS qua DoT                                                       │
+│      Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn tuỳ                │
+│      danh sách nằm trên đám mây của bạn.                                           │
 │                                                                                    │
-│                                ◀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN                      │
-│                                Nằm trên đám mây, không nằm trong máy.              │
-│  2  TẦNG 1 · zapret2 · desync  Mở kết nối tới IP đó. Cắt gói đầu của               │
-│                                kết nối HTTPS thành hai đoạn, đoạn đầu              │
-│                                chỉ mang 1 byte. Bộ lọc của nhà mạng cần            │
-│                                nguyên gói để đọc tên miền nên không                │
-│                                khớp mẫu nào và cho qua.                            │
+│      ◀ ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                        │
+│      Danh sách chặn nằm trên đám mây chứ không nằm trong máy,                      │
+│      nên phần cài đặt bên dưới không tự làm được bước này.                         │
 │                                                                                    │
-│                                Không chặn gì cả — chỉ chống bị chặn.               │
+│  ②  TẦNG 1 · zapret2 · desync                                                      │
+│      Mở kết nối tới IP vừa nhận được. Cắt gói đầu của kết nối                      │
+│      HTTPS thành hai đoạn, đoạn đầu chỉ mang 1 byte. Bộ lọc của                    │
+│      nhà mạng cần nguyên gói đó để đọc tên miền, nên không khớp                    │
+│      mẫu nào và cho qua.                                                           │
 │                                                                                    │
-│  Bị chặn ở bước 1 ⇒ không có kết nối nào để mà sửa ở bước 2.                       │
+│      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                     │
+│      miền bị chặn ở bước ① thì không có kết nối nào để mà sửa                      │
+│      ở bước ②.                                                                     │
 │                                                                                    │
 │  KHI CÓ AI GỌI TỚI MÁY BẠN                                                         │
 │                                                                                    │
-│  3  TẦNG 3 · ufw · chặn INPUT  Chặn mọi thứ đi vào máy, trừ KDE Connect            │
-│                                trong mạng LAN.                                     │
+│  ③  TẦNG 3 · ufw · chặn INPUT                                                      │
+│      Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.                      │
 │                                                                                    │
 │  LUÔN LUÔN BẬT, MỌI LÚC MỞ MÁY                                                     │
 │                                                                                    │
-│  4  TẦNG 2b · ufw · tường DNS  Chỉ cho hỏi NextDNS ở cổng 53 và 853,               │
-│                                chặn mọi nơi hỏi DNS khác — cả IPv4 lẫn IPv6.       │
+│  ④  TẦNG 2b · ufw · tường chặn DNS                                                 │
+│      Chỉ cho phép hỏi NextDNS ở cổng 53 và 853, chặn mọi nơi hỏi                   │
+│      DNS khác — cả IPv4 lẫn IPv6.                                                  │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
