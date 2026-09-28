@@ -22,6 +22,7 @@ ZAPRET_DIR=/opt/zapret2
 ZAPRET_REPO=https://github.com/bol-van/zapret
 
 ND_ID=""; DRY=0; ACTION=install
+ND_KEY=""                       # rỗng = tự dò. Xem nd_key_path.
 
 # 4 địa chỉ NextDNS: 2 IPv4 + 2 IPv6. Ghi đủ 4 để hỏng một vẫn còn ba.
 ND_V4="45.90.28.0 45.90.30.0"
@@ -55,8 +56,17 @@ install.sh — hệ thống mạng 3 tầng (zapret2 + NextDNS + ufw)
 Tùy chọn
   --nd-id ID     ID profile NextDNS, 6 ký tự hex (0-9a-f).
                  Lấy ở https://my.nextdns.io → Settings → General
+  --nd-key PATH  API key NextDNS, để kiểm ID có thật không.
+                 Mặc định tự dò ở /root/.config/nextdns/api.key
   --dry          in ra sẽ làm gì, không sửa bất cứ thứ gì
   --uninstall    gỡ 3 tầng, phục hồi từ /var/backups/zapret2-dotfile
+
+Về --nd-key
+  Không có key thì script vẫn chạy, nhưng KHÔNG kiểm được ID có thật hay
+  không. ID sai không gây lỗi nào — NextDNS chỉ trả lời bằng profile mặc
+  định của họ, nên máy vẫn thông mạng, tầng 2 lọc rất ít, tầng 1 không có
+  gì để sửa, và bộ kiểm vẫn báo đạt. Key nằm NGOÀI repo, quyền 600.
+  Đặt key ở /root/.config/nextdns/api.key, hoặc chỉ định --nd-key.
 
 Cần sudo. Mất mạng thì chạy lại đúng dòng này:
   sudo bash install.sh --uninstall
@@ -66,6 +76,7 @@ USAGE
 while [ $# -gt 0 ]; do
   case "$1" in
     --nd-id)     [ $# -ge 2 ] || die "--nd-id cần một giá trị"; ND_ID=$2; shift 2 ;;
+    --nd-key)    [ $# -ge 2 ] || die "--nd-key cần một đường dẫn"; ND_KEY=$2; shift 2 ;;
     --dry)       DRY=1; shift ;;
     --uninstall) ACTION=uninstall; shift ;;
     -h|--help)   usage; exit 0 ;;
@@ -145,6 +156,137 @@ read_exclude() {
 }
 
 # =============================================================================
+#  nd_check — hỏi NextDNS xem profile trong --nd-id có thật không
+#
+#  VÌ SAO CẦN
+#    --nd-id chỉ kiểm đúng 6 ký tự hex. ID sai vẫn chạy êm: NextDNS trả lời
+#    bình thường bằng profile mặc định của họ. Đo được 29/09 — cùng IP, chỉ
+#    đổi SNI:
+#        785fad.dns.nextdns.io  -> CHAN  (mask.icloud.com, có trong denylist)
+#        aaaaaa.dns.nextdns.io  -> cho qua
+#        000000 / ffffff        -> cho qua
+#    Nghĩa là ID sai ⇒ tầng 2 lọc rất ít, tầng 1 cũng không có gì để sửa, mà
+#    KHÔNG có lỗi nào hiện ra. Đây là kiểu hỏng nguy hiểm nhất: máy vẫn chạy.
+#
+#  API CÓ PHÂN BIỆT ĐƯỢC KHÔNG — có, nhưng cần key
+#    GET https://api.nextdns.io/profiles/<ID>  với  X-API-Key:
+#        ID thật  -> 200, ~17 KB
+#        ID sai   -> 404 {"errors":[{"code":"notFound"}]}
+#    KHÔNG có key -> 403 authRequired cho MỌI ID, kể cả ID thật. Nên khi không
+#    kiểm được thì phải nói rõ là không kiểm — im lặng coi như đã kiểm thì
+#    lại trở lại đúng cái lỗi trên.
+#
+#  KHÔNG lấy IP NextDNS từ API — giữ 4 địa chỉ đang có
+#    API trả ipv4: [] và linkedIp 45.90.28.134, KHÔNG phải 4 địa chỉ anycast
+#    trong template. Bốn địa chỉ đó đã đo thật: cả 4 nhận DoT 853 và định
+#    tuyến đúng theo ID. Đổi sang IP từ API là đổi cấu hình đang chạy tốt
+#    sang cấu hình chưa từng đo. API chỉ dùng để kiểm ID và báo tình trạng.
+#
+#  API key KHÔNG nằm trong repo — nó ở ngoài, người dùng tự đặt.
+# =============================================================================
+
+# nd_key_path — in đường dẫn key đầu tiên tìm thấy, hoặc rỗng.
+# Dò cả /root (HOME khi chạy sudo) và nhà của người gọi sudo, vì đặt key ở
+# ~/.config của người dùng là chỗ tự nhiên nhất.
+nd_key_path() {
+  local p
+  for p in "$ND_KEY" /root/.config/nextdns/api.key; do
+    [ -n "$p" ] && [ -r "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  if [ -n "${SUDO_USER:-}" ]; then
+    p=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+    [ -n "$p" ] && [ -r "$p/.config/nextdns/api.key" ] && { printf '%s' "$p/.config/nextdns/api.key"; return 0; }
+  fi
+  return 1
+}
+
+# nd_json <tệp> <biểu thức python> — đọc 1 trường JSON, không có python3 thì
+# bỏ trống. Chỉ dùng cho phần BÁO TÌNH TRẠNG; phần quyết định (404 hay không)
+# chỉ cần HTTP code nên không phụ thuộc trình đọc JSON.
+nd_json() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null || true
+import json, sys
+d = json.load(open(sys.argv[1])).get('data') or {}
+try: v = eval(sys.argv[2], {'d': d, 'len': len})
+except Exception: v = ''
+print('' if v is None else v)
+PY
+}
+
+# nd_check — gọi sau khi đã kiểm định dạng ID. Chết (die) nếu ID sai; mọi
+# trường hợp không kiểm được thì chỉ cảnh báo, không chặn cài.
+nd_check() {
+  local kf body code name dn al bl sec
+
+  command -v curl >/dev/null 2>&1 || {
+    warn "không có curl — BỎ QUA kiểm ID NextDNS. Nếu ID sai, mọi tầng vẫn chạy nhưng không lọc."
+    return 0
+  }
+
+  if ! kf=$(nd_key_path); then
+    warn "không tìm thấy API key NextDNS — BỎ QUA kiểm ID."
+    warn "ID sai sẽ không báo lỗi, chỉ chạy nhưng không lọc."
+    warn "Đặt key ở $HOME/.config/nextdns/api.key (quyền 600), hoặc dùng --nd-key /đường/dẫn,"
+    warn "rồi chạy lại để có kiểm. Kiểm tay:  dig +short <một tên miền profile của bạn chặn>"
+    return 0
+  fi
+
+  body=$(mktemp) || { warn "không tạo được file tạm — BỎ QUA kiểm ID."; return 0; }
+  # -o ghi thân, -w in HTTP code ra stdout. Tách 2 thứ này là chỗ dễ lẫn:
+  # gộp chung rồi lấy $? thì $? là của echo, không phải của curl.
+  code=$(curl -s -m 20 -o "$body" -w '%{http_code}' \
+           -H "X-API-Key: $(tr -d '[:space:]' < "$kf")" \
+           "https://api.nextdns.io/profiles/$ND_ID" 2>/dev/null) || code=""
+
+  # Chỉ nhánh 200 được đi tiếp xuống phần báo tình trạng. Mọi nhánh còn lại phải
+  # return ngay — bản đầu thiếu return nên 403 và mất mạng rơi xuống dưới, in ra
+  # "OK profile NextDNS: ?" tức báo ĐẠT trong khi phép kiểm đã hỏng. Báo OK giả
+  # tệ hơn không báo gì.
+  case "$code" in
+    200) : ;;
+    404) rm -f "$body"
+        die "NextDNS không có profile '$ND_ID' (API trả 404 notFound).
+       Định dạng đúng nhưng profile không tồn tại — nếu cài tiếp thì máy vẫn chạy
+       nhưng KHÔNG lọc gì, và tầng 1 cũng không có gì để sửa.
+       Lấy đúng ID ở https://my.nextdns.io → Settings → General.
+       Nếu đây là profile của người khác thì key của bạn không nhìn thấy nó —
+       dùng API key của chính profile đó." ;;
+    403) rm -f "$body"
+        warn "API key trong $kf bị NextDNS từ chối (403) — BỎ QUA kiểm ID."
+        warn "Kiểm tay:  dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
+    "")  rm -f "$body"
+        warn "không gọi được api.nextdns.io (mất mạng, hoặc bị chặn) — BỎ QUA kiểm ID."
+        warn "Cài xong nhớ kiểm tay:  dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
+    *)   rm -f "$body"
+        warn "API trả HTTP $code lạ (thường là 429 quá nhiều request) — BỎ QUA kiểm ID."
+        warn "Kiểm tay:  dig +short <một tên miền profile của bạn chặn>"; return 0 ;;
+  esac
+
+  # Tới đây là ID thật. Báo tình trạng — đây là thứ mà bản cũ thiếu hẳn:
+  # người dùng không có cách nào biết tầng 2 có thật sự lọc không.
+  name=$(nd_json "$body" 'd.get("name","")')
+  dn=$(nd_json "$body" 'len(d.get("denylist",[]))')
+  al=$(nd_json "$body" 'len(d.get("allowlist",[]))')
+  bl=$(nd_json "$body" 'len(d.get("privacy",{}).get("blocklists",[]))')
+  ok "profile NextDNS: ${name:-?} (ID $ND_ID)"
+  ok "trên đám mây: $bl blocklist · $dn mục chặn · $al mục cho qua"
+
+  # Hai công tắc này quyết định gần như hết kết quả. Tắt thì tầng 2 vẫn
+  # "chạy" nhưng phần lớn chặn biến mất — và đó cũng là kiểu hỏng im lặng.
+  #
+  # nd_json trả "tắt" KHI công tắc tắt, rỗng khi công tắc bật. Phải cảnh báo
+  # lúc CHUỖI CÓ NỘI DUNG. Bản đầu viết [ -z ... ] — tức cảnh báo đúng lúc
+  # mọi thứ ổn và im lặng đúng lúc hỏng. Đảo điều kiện là cảnh báo hỏng nhất,
+  # vì nó dạy người đọc bỏ qua cảnh báo.
+  for sw in aiThreatDetection threatIntelligenceFeeds; do
+    sec=$(nd_json "$body" '"tắt" if not d.get("security",{}).get("'"$sw"'") else ""')
+    [ -n "$sec" ] && warn "công tắc $sw đang TẮT — nhiều trang sẽ không bị chặn"
+  done
+  rm -f "$body"
+  return 0
+}
+
+# =============================================================================
 step "1/9 · KIỂM TRA MÁY"
 if [ "$ACTION" = install ]; then
   miss=()
@@ -156,6 +298,7 @@ if [ "$ACTION" = install ]; then
   printf '%s' "$ND_ID" | grep -qE '^[0-9a-f]{6}$' \
     || die "--nd-id phải 6 ký tự hex (0-9a-f), bạn đưa '${ND_ID:-<rỗng>}' — lấy ở my.nextdns.io"
   ok "ID NextDNS: $ND_ID"
+  nd_check
 fi
 
 # =============================================================================

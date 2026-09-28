@@ -24,7 +24,7 @@ Hệ thống này gom mọi câu hỏi tên miền về một nơi duy nhất, v
 │                                                                                    │
 │      << ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                       │
 │      Danh sách chặn nằm trên đám mây chứ không nằm trong máy,                      │
-│      nên phần cài đặt bên dưới không tự làm được bước này.                         │
+│      nên phần cài đặt bên dưới chỉ kiểm được, không bật được.                      │
 │                                                                                    │
 │  [2]  TẦNG 1 · zapret2 · desync                                                    │
 │      Mở kết nối tới IP vừa nhận được. Cắt gói đầu của kết nối                      │
@@ -89,6 +89,12 @@ sudo bash install.sh --nd-id ABC123           # cài thật
 <https://my.nextdns.io> → Settings → General. Máy chưa có zapret2 thì script tự
 cài luôn.
 
+Script sẽ hỏi NextDNS xem ID đó có thật không, rồi in ra tên profile và số
+mục chặn / cho qua / blocklist đang có trên đám mây. Cần API key ở
+`/root/.config/nextdns/api.key` (quyền 600) — key nằm ngoài repo. Không có key
+thì script **nói rõ là không kiểm được**, chứ không im lặng coi như đã kiểm; key
+ở chỗ khác thì chỉ định bằng `--nd-key /đường/dẫn`.
+
 Trước khi sửa gì, script chụp lại trạng thái hiện tại vào
 `/var/backups/zapret2-dotfile/`. Chỉ có một bản, tên cố định, lần sau ghi đè.
 
@@ -106,13 +112,15 @@ sudo bash install.sh --uninstall
 
 ## Ba việc còn lại, phải tự làm
 
-Ba việc sau nằm ngoài máy, nên script không tự làm được.
+Ba việc sau nằm ngoài máy. `install.sh` **kiểm được** cái thứ nhất, nhưng không
+bật được — nó chỉ có quyền đọc.
 
-**Bật cấu hình tầng 2 trên đám mây.** Đây là bước dễ bỏ nhất, và bỏ thì mọi
-kiểm vẫn báo đạt — vì cấu hình sai nằm trên đám mây chứ không nằm trong máy.
-Trong đó hai công tắc quyết định gần như hết kết quả: `aiThreatDetection` và
-`threatIntelligenceFeeds`, đều bật. Tắt chúng thì phần lớn chặn biến mất, còn
-danh sách chặn thủ công thì không đổi.
+**Bật cấu hình tầng 2 trên đám mây.** Đây là bước dễ bỏ nhất. Script sẽ báo tên
+profile, số mục chặn / cho qua, và **cảnh báo nếu `aiThreatDetection` hoặc
+`threatIntelligenceFeeds` đang tắt** — hai công tắc này quyết định gần như hết
+kết quả, tắt đi thì phần lớn chặn biến mất mà danh sách chặn thủ công vẫn giữ
+nguyên. Nhưng bật thì bạn phải tự làm ở <https://my.nextdns.io>.
+
 
 **Đặt đường mặc định.** Hệ thống này chỉ được đo trên cáp, nhưng
 NetworkManager mặc định lại ưu tiên wifi, nên lưu lượng sẽ chạy nhầm qua
@@ -136,8 +144,22 @@ nào chặn riêng mà không chặn cả web. Để trình duyệt tự chọn 
 
 ## Về API key
 
-Repo không chứa API key của NextDNS, dù dữ liệu profile đọc được mà không cần
-key. Repo private vẫn hiện với người được mời cộng tác, và chuyển sang public chỉ
-mất vài giây — mà key thì cho phép sửa cả danh sách chặn DNS.
+Key **không** nằm trong repo, và giờ nó còn cần thiết hơn trước: không có key thì
+`GET /profiles/<ID>` trả `403` cho **mọi** ID, kể cả ID thật — tức là không kiểm
+được profile có tồn tại không.
 
-Key đặt ở `/root/.config/nextdns/api.key`, quyền 600, ngoài repo.
+Đặt ở `/root/.config/nextdns/api.key`, quyền 600:
+
+```bash
+sudo install -d -m 700 /root/.config/nextdns
+sudo tee /root/.config/nextdns/api.key >/dev/null   # dán key, rồi Ctrl-D
+sudo chmod 600 /root/.config/nextdns/api.key
+```
+
+Lấy key ở <https://my.nextdns.io> → Account → API. Key cho phép **sửa** danh
+sách chặn DNS, nên không để trong repo — repo private vẫn hiện với người được
+mời cộng tác, và chuyển sang public chỉ mất vài giây.
+
+Không có key thì `install.sh` vẫn cài được. Nó chỉ không kiểm được ID, và sẽ báo
+điều đó.
+
