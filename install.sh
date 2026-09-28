@@ -19,7 +19,18 @@ CONF="$REPO_DIR/config"
 BACKUP=/var/backups/zapret2-dotfile
 Z2D_SYSCTL=/etc/ufw/z2d-sysctl.conf
 ZAPRET_DIR=/opt/zapret2
-ZAPRET_REPO=https://github.com/bol-van/zapret
+ZAPRET_REPO=https://github.com/bol-van/zapret2
+# GHIM tag, không theo master.
+#   (1) Repo đúng là `zapret2`, KHÔNG phải `zapret`. `bol-van/zapret` là dự án
+#       khác: không có thư mục nfq2/ (chỉ có nfq/), build ra binary `nfqws` chứ
+#       không phải `nfqws2`, và config.default dùng khoá NFQWS_* chứ không có
+#       NFQWS2_*. Bản đầu clone nhầm repo nên cài sạch sẽ chết ngay, hoặc tệ
+#       hơn — build ra binary nào đó rồi bỏ qua toàn bộ khoá NFQWS2_* của ta.
+#   (2) Master đi thì không kiểm soát được. Đã thử: HEAD 2026-09-18 vẫn ổn,
+#       nhưng đổi cấu trúc thì không có gì chặn. Ghim tag đã đo.
+#   Tag v1.0.5.2 (6b6c63e, 2026-09-15) đã kiểm thật: có nfq2/ với 29 file .c,
+#   8 khoá NFQWS2_ trong config.default, `make all` ra nfq2/nfqws2 chạy được.
+ZAPRET_TAG=v1.0.5.2
 
 ND_ID=""; DRY=0; ACTION=install
 ND_KEY=""                       # rỗng = tự dò. Xem nd_key_path.
@@ -88,6 +99,150 @@ done
 [ -d "$CONF" ] || die "không thấy config/ cạnh script: $CONF"
 
 # =============================================================================
+#  GỠ — phục hồi đúng trạng thái trước khi cài
+#
+#  ⚠ BẢN ĐẦU KHÔNG GỠ GÌ CẢ.
+#  Chỉ bước 1 được bảo vệ bởi `ACTION = install`; bước 2 đến 9 thì không. Nên
+#  `--uninstall` chạy đủ 9 bước CÀI ĐẶT rồi in "Xong." — tức cài chứ không gỡ.
+#  Kiểm chứng: `bash install.sh --uninstall --dry` in ra đủ 9 bước.
+#  Tệ hơn: README dặn "mất mạng thì chạy uninstall", tức dặn ngược.
+#
+#  Vì vậy phần gỡ phải đứng TRƯỚC bước 1 và tự thoát, không chạy tiếp xuống.
+# =============================================================================
+uninstall() {
+  # ⚠ MỌI khối phá huỷ ở đây đều phải hỏi $DRY trước.
+  #   Bản đầu của hàm này bỏ trống, nên `bash install.sh --uninstall --dry`
+  #   thật sự chạy `systemctl disable --now zapret2` — tắt cả tầng 1 trên máy
+  #   thật. Đã dính: chính tôi chạy phép thử này và làm tầng 1 ngãng.
+  #   --dry mà thay đổi máy thì còn tệ hơn là không có --dry.
+  if [ "$DRY" = 1 ]; then D=1; else D=0; fi
+
+  step "GỞ · dừng zapret2"
+  if [ "$D" = 1 ]; then
+    say "    [dry] dừng + bỏ tự khởi động zapret2, xoá 3 unit ở /etc/systemd/system/"
+  else
+    systemctl disable --now zapret2 >/dev/null 2>&1
+    for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
+      rm -f "/etc/systemd/system/$u"
+    done
+    systemctl daemon-reload
+    ok "zapret2 đã dừng, unit đã gỡ"
+  fi
+
+  step "GỞ · 20 dòng rule ufw (16 đặc tả)"
+  # Đúng thứ tự như lúc thêm ở bước 6 và 7. Tổng 16 đặc tả:
+  #   4 IP × 2 cổng (53/udp, 853/tcp)      =  8 ALLOW OUT
+  #   4 cổng × "any"                       =  4 DENY OUT  (mỗi cái ra 2 dòng: v4 + v6)
+  #   2 nguồn × 2 giao thức (1714:1764)    =  4 ALLOW IN
+  # ufw hiện 20 dòng rule; ta xoá theo 16 đặc tả.
+  if [ "$D" = 1 ]; then
+    say "    [dry] xoá 16 đặc tả rule: 8 ALLOW + 4 DENY + 4 KDE Connect"
+  else
+    n_del=0
+    for ip in $ND_V4 $ND_V6; do
+      ufw_del_port ALLOW OUT "$ip" 53  udp && n_del=$((n_del+1))
+      ufw_del_port ALLOW OUT "$ip" 853 tcp && n_del=$((n_del+1))
+    done
+    for pp in $DNS_PORTS; do
+      ufw_del_port DENY OUT any "${pp%/*}" "${pp#*/}" && n_del=$((n_del+1))
+    done
+    for src in 192.168.0.0/16 fe80::/10; do
+      for pr in tcp udp; do
+        ufw_del_port ALLOW IN "$src" 1714:1764 "$pr" && n_del=$((n_del+1))
+      done
+    done
+    if [ "$n_del" -ge 16 ]; then
+      ok "đã xoá $n_del/16 đặc tả rule"
+    else
+      warn "chỉ xoá được $n_del/16 đặc tả rule"
+      warn "kiểm tay:  ufw status numbered   (còn dòng nào ghi 53, 853 hay 1714:1764 là sót)"
+    fi
+  fi
+
+  step "GỞ · tệp cấu hình"
+  # Với mỗi tệp: CÓ trong backup thì khôi phục; KHÔNG có trong backup thì xoá
+  # hẳn — vì không có trong backup nghĩa là trước khi cài nó chưa tồn tại.
+  #
+  # Đếm bằng `if` chứ không `cmd && n=$((n+1))`: lệnh hỏng thì biến không tăng
+  # mà không ai báo — bản đầu in "0 tệp xoá" trong khi đã thử 7 tệp và cả 7
+  # đều hỏng. Im lặng kiểu đó nguy hiểm hơn là không đếm.
+  if [ "$D" = 1 ]; then
+    say "    [dry] khôi phục hoặc xoá 7 tệp theo $BACKUP, xoá /opt/zapret2"
+  else
+    n_ok=0 n_rm=0 n_fail=0
+    for rel in etc/systemd/resolved.conf \
+               etc/sysctl.d/60-z2d-hardening.conf \
+               etc/ufw/sysctl.conf \
+               etc/ufw/z2d-sysctl.conf \
+               etc/default/ufw \
+               etc/nftables.conf \
+               etc/pacman.d/hooks/z2d-pacman-ufw.hook; do
+      if [ -e "$BACKUP/$rel" ]; then
+        mkdir -p "/$(dirname "$rel")"
+        if cp -a "$BACKUP/$rel" "/$rel" 2>/dev/null; then n_ok=$((n_ok+1)); else n_fail=$((n_fail+1)); fi
+      else
+        if [ ! -e "/$rel" ]; then
+          n_rm=$((n_rm+1))                       # đã vắng sẵn, không cần xoá
+        elif rm -f "/$rel" 2>/dev/null; then n_rm=$((n_rm+1)); else n_fail=$((n_fail+1)); fi
+      fi
+    done
+    if [ -d "$BACKUP/etc/systemd/system/ufw.service.d" ]; then
+      cp -a "$BACKUP/etc/systemd/system/ufw.service.d/." /etc/systemd/system/ufw.service.d/ 2>/dev/null
+    fi
+    # Những thứ do ta TẠO RA, không bao giờ có trong backup.
+    rm -f /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
+    rm -f /usr/local/bin/z2d-sysctl-apply
+    rm -rf "$ZAPRET_DIR" 2>/dev/null
+    # Phải phân nhánh theo n_fail. Bản đầu in "OK …" vô điều kiện, nên khi tệp
+    # không xử lý được thì vẫn đọc là đã xong.
+    if [ "$n_fail" -eq 0 ]; then
+      ok "$n_ok tệp khôi phục · $n_rm tệp xoá (trước đó chưa có)"
+    else
+      warn "$n_ok khôi phục · $n_rm xoá · $n_fail KHÔNG xử lý được"
+      warn "xem lại: ls -l /etc/systemd/resolved.conf /etc/ufw/ /etc/default/ufw"
+    fi
+  fi
+
+  step "GỞ · nạp lại"
+  if [ "$D" = 1 ]; then
+    say "    [dry] trỏ resolv.conf về stub, restart systemd-resolved + ufw"
+  else
+    # Phải kiểm kết quả từng lệnh. Bản đầu `rm` và `ln` đều hỏng (Permission
+    # denied) mà vẫn in "systemd-resolved + ufw đã nạp lại" — đọc chữ OK là
+    # tin sai, và người dùng mất mạng thì tưởng đã gỡ xong.
+    rm -f /etc/resolv.conf 2>/dev/null
+    systemctl restart systemd-resolved >/dev/null 2>&1
+    n_res=0
+    if [ -e /run/systemd/resolve/stub-resolv.conf ]; then
+      if ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null; then
+        n_res=1
+      else
+        warn "không tạo được symlink /etc/resolv.conf — DNS có thể hỏng"
+      fi
+    else
+      warn "không có /run/systemd/resolve/stub-resolv.conf — DNSStubListener đang tắt?"
+    fi
+    systemctl restart ufw >/dev/null 2>&1
+    if [ "$n_res" = 1 ]; then
+      ok "resolv.conf → stub · ufw đã nạp lại"
+    else
+      warn "resolv.conf CHƯA trỏ lại stub — kiểm:  readlink -f /etc/resolv.conf"
+    fi
+  fi
+
+  say ""
+  if [ "$D" = 1 ]; then
+    ok "XEM XONG — chưa thay đổi gì cả"
+  elif [ -d "$BACKUP" ]; then
+    ok "Xong. Trạng thái trước khi cài nằm ở $BACKUP"
+  else
+    warn "Xong, nhưng KHÔNG có $BACKUP để đối chiếu — gỡ xong không còn bản sao"
+  fi
+  say "  nếu DNS vẫn lỗi:  nmcli con mod '<tên profile>' ipv4.ignore-auto-dns no ipv6.ignore-auto-dns no"
+  exit 0
+}
+
+# =============================================================================
 #  Đọc `ufw status` — BA bố cục khác nhau
 #
 #   OUT, có địa chỉ đích : 45.90.28.0  53/udp  ALLOW OUT  Anywhere
@@ -127,6 +282,42 @@ ufw_has() { # ufw_has <any|ip|v6> <port/proto> <ALLOW|DENY> [IN|OUT]
     }
     END { exit(f ? 0 : 1) }'
 }
+
+# ufw_del_port <ALLOW|DENY> <IN|OUT> <địa chỉ> <cổng> <proto> — xoá đúng
+# rule mà ufw_has tìm thấy. Trả 0 nếu có xoá, 1 nếu không có rule nào khớp.
+#
+# Xoá THEO ĐẶC TẢ (`ufw delete ...`), KHÔNG phân tích số thứ tự từ
+# `ufw status numbered`. Ba lý do:
+#   (1) Chính repo này ghi ở phần trên: `ufw status` in BA bố cục khác nhau,
+#       và đó là nơi bộ kiểm sai nhiều nhất. Xoá theo số phải dựa vào đúng
+#       bố cục đó.
+#   (2) Xoá một rule làm số thứ tự các rule sau dịch lên, nên phải quét lại
+#       sau mỗi lần xoá.
+#   (3) `ufw delete <đặc tả>` tự khớp theo nội dung rule, không cần biết số.
+#       Cách này không phụ thuộc bố cục hiển thị.
+#
+# KHÔNG lọc bằng comment: ufw lưu comment dạng hex
+# (comment=7a3264206e657874646e73203533 = "z2d nextdns 53") nên grep chữ "z2d"
+# luôn ra 0 dòng.
+#
+# Lặp tối đa 3 lần: một đặc tả "any" tạo RA HAI rule (v4 + v6) và ufw đôi khi
+# chỉ xoá một; lặp lại cho tới khi báo "non-existent" thì hết.
+ufw_del_port() { # ufw_del_port <ALLOW|DENY> <IN|OUT> <addr> <port> <proto>
+  local act=$1 dir=$2 addr=$3 port=$4 proto=$5 n=0 r
+  while [ "$n" -lt 3 ]; do
+    if [ "$addr" = "any" ]; then
+      r=$(ufw delete "$act" out to any port "$port" proto "$proto" 2>&1)
+    else
+      r=$(ufw delete "$act" "$dir" from "$addr" to any port "$port" proto "$proto" 2>&1)
+    fi
+    case "$r" in
+      *"non-existent"*|*"Skipping"*|*"ERROR"*) break ;;
+    esac
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ]
+}
+
 
 wall_complete() {
   local ok_=1 ip pp
@@ -286,14 +477,67 @@ nd_check() {
   return 0
 }
 
+# -----------------------------------------------------------------------------
+#  Cài gói phụ thuộc
+#
+#  Máy mới cài Arch/CachyOS thường thiếu nftables, ufw, make, gcc… Bản đầu chỉ
+#  kiểm rồi chết, đẩy hết việc pacman ra cho người dùng tự gõ.
+#
+#  Hỏi bằng `pacman -Qq` chứ không `command -v`: cần biết CÓ GÓI hay không,
+#  vì `command -v` trả về 0 ngay cả khi gói đã bị gỡ mà lệnh còn sót.
+#
+#  --dry không cài gì cả, chỉ báo đang thiếu gì.
+# -----------------------------------------------------------------------------
+need_pkgs() {
+  local p miss=()
+  for p in "$@"; do
+    pacman -Qq "$p" >/dev/null 2>&1 || miss+=("$p")
+  done
+  [ ${#miss[@]} -eq 0 ] && return 0
+  if [ "$DRY" = 1 ]; then
+    say "    [dry] thiếu gói, sẽ cài: ${miss[*]}"
+    return 0
+  fi
+  say "  thiếu gói: ${miss[*]}"
+  say "  đang cài bằng pacman (có thể hỏi mật khẩu quản trị)…"
+  # KHÔNG nuốt lỗi trong im lặng: pacman hỏng thì phải báo, không in "đã cài".
+  pacman -S --needed --noconfirm "${miss[@]}" \
+    || die "pacman không cài được: ${miss[*]}. Cài tay rồi chạy lại:
+       sudo pacman -S --needed ${miss[*]}"
+  ok "đã cài: ${miss[*]}"
+}
+
+# need_libs <thư viện> <gói>… — cài gói CHỈ khi thư viện thật sự thiếu.
+# nfqws2 nạp 5 thư viện; thiếu thì build vẫn xong nhưng service không lên, và
+# lỗi hiện ra là "error while loading shared libraries" — khó đoán nguyên nhân.
+need_libs() {
+  local lib p miss=()
+  while [ $# -gt 0 ]; do
+    lib=$1; p=$2; shift 2
+    # ldconfig -p là nguồn chuẩn; duyệt /usr/lib cũng được nhưng dễ sót.
+    ldconfig -p 2>/dev/null | grep -qF "$lib" || miss+=("$p")
+  done
+  [ ${#miss[@]} -eq 0 ] && return 0
+  need_pkgs "${miss[@]}"
+}
+
+# =============================================================================
+# Đường GỠ chạy ở đây — sau TẤT CẢ định nghĩa hàm, trước bước 1.
+# Đặt sớm hơn thì ufw_del_port chưa tồn tại lúc gọi.
+[ "$ACTION" = uninstall ] && uninstall
+
 # =============================================================================
 step "1/9 · KIỂM TRA MÁY"
 if [ "$ACTION" = install ]; then
-  miss=()
-  for c in bash nft systemctl ufw nmcli sysctl; do
-    command -v "$c" >/dev/null 2>&1 || miss+=("$c")
-  done
-  [ ${#miss[@]} -eq 0 ] || die "thiếu lệnh: ${miss[*]} — sudo pacman -S --needed nftables ufw networkmanager"
+  # Đủ 3 tầng + 3 lớp phòng thủ. Bỏ gói nào thì tầng đó hỏng, nên cài hết một
+  # lượt thay vì mỗi tầng tự cài — người dùng chỉ phải đồng ý một lần.
+  #   nftables      : nft, tầng 1 (FWTYPE=nftables) + tầng 2b/3
+  #   ufw           : tường DNS + chặn INPUT
+  #   networkmanager: ignore-auto-dns (tầng 2)
+  #   procps-ng     : sysctl, 18 khoá hardening
+  #   iproute2      : ip, dùng khi kiểm route
+  #   git, make, gcc: clone + build zapret2
+  need_pkgs nftables ufw networkmanager procps-ng iproute2 git make gcc
   ok "đủ lệnh cần thiết"
   printf '%s' "$ND_ID" | grep -qE '^[0-9a-f]{6}$' \
     || die "--nd-id phải 6 ký tự hex (0-9a-f), bạn đưa '${ND_ID:-<rỗng>}' — lấy ở my.nextdns.io"
@@ -338,16 +582,48 @@ if [ -x "$ZAPRET_DIR/nfq2/nfqws2" ]; then
 elif [ "$DRY" = 1 ]; then
   ok "[dry] sẽ clone $ZAPRET_REPO rồi build"
 else
-  pkgs=(); for p in git go nftables iproute2; do pacman -Qq "$p" >/dev/null 2>&1 || pkgs+=("$p"); done
-  # KHÔNG dùng `[ ] && A || B`: pacman hỏng thì B vẫn chạy và in "đủ gói".
-  if [ ${#pkgs[@]} -eq 0 ]; then ok "đủ gói build"
-  elif pacman -S --needed --noconfirm "${pkgs[@]}" >/dev/null 2>&1; then ok "đã cài: ${pkgs[*]}"
-  else die "cài gói build thất bại: ${pkgs[*]}"; fi
+  # KHÔNG cần `go`. Bản đầu có trong danh sách: nfq2 là C thuần (29 file .c,
+  # 0 file .go) nên Go vô dụng ở đây — và `go` là gói nặng, cài thừa mất hàng
+  # trăm MB. Bỏ đi.
   rm -rf "$ZAPRET_DIR"
-  git clone --depth 1 "$ZAPRET_REPO" "$ZAPRET_DIR" || die "git clone thất bại — kiểm mạng"
-  make -C "$ZAPRET_DIR" nfq >/dev/null 2>&1 || die "build nfq thất bại"
+  git clone --depth 1 --branch "$ZAPRET_TAG" "$ZAPRET_REPO" "$ZAPRET_DIR" \
+    || die "git clone thất bại — kiểm mạng rồi thử lại"
+  # `make nfq` KHÔNG tồn tại: Makefile của zapret2 chỉ có all · systemd ·
+  # android · bsd · clean. Chạy `make nfq` được "No rule to make target 'nfq'".
+  # Và vì có thư mục tên `nfq`… ở repo khác, `make nfq` còn có thể báo
+  # "Nothing to be done" — tức im lặng không build gì cả. Dùng `all`.
+  make -C "$ZAPRET_DIR" all >/dev/null 2>&1 \
+    || die "build thất bại. Xem lỗi: cd /tmp && git clone --depth 1 --branch $ZAPRET_TAG $ZAPRET_REPO z && cd z && make all"
   [ -x "$ZAPRET_DIR/nfq2/nfqws2" ] || die "build xong nhưng không thấy nfq2/nfqws2"
-  ok "đã build nfq2/nfqws2"
+  ok "đã build nfq2/nfqws2 ($ZAPRET_TAG)"
+
+  # 5 thư viện lúc CHẠY. Thiếu thì build vẫn xong, service chết lúc start với
+  # "error while loading shared libraries" — lỗi không nói ra nguyên nhân.
+  need_libs libnetfilter_queue.so.1 libnetfilter_queue \
+            libnfnetlink.so.0    libnfnetlink \
+            libmnl.so.0          libmnl \
+            libluajit-5.1.so.2   luajit \
+            libz.so.1            zlib
+  ok "thư viện lúc chạy: đủ 5"
+
+  # ---- systemd unit ----
+  # Bản đầu KHÔNG copy unit, chỉ gọi `systemctl enable`/`restart`. Trên máy mới
+  # thì không có unit nào để enable, `systemctl restart` chết, và tầng 1 mất.
+  # Máy đang chạy có unit ở /usr/lib/systemd/system/ do cài tay từ trước, nên
+  # bản đầu chạy trơn và lỗi này không lộ.
+  #
+  # Cài vào /etc/systemd/system/ (đúng chỗ dành cho unit cục bộ), đè lên bản
+  # trong /usr/lib nếu có. File lấy từ chính repo đã ghim, không tự viết tay —
+  # ExecStart trỏ vào init.d/sysv/zapret2, tức nơi binary vừa dựng xong.
+  n_unit=0
+  for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
+    src="$ZAPRET_DIR/init.d/systemd/$u"
+    [ -f "$src" ] || continue
+    install -Dm644 "$src" "/etc/systemd/system/$u" && n_unit=$((n_unit + 1))
+  done
+  [ "$n_unit" -ge 1 ] || die "repo không có file systemd unit — tầng 1 sẽ không khởi động"
+  systemctl daemon-reload
+  ok "$n_unit unit systemd → /etc/systemd/system/"
 fi
 
 # =============================================================================
@@ -557,23 +833,21 @@ say ""
 [ "$nbad" -eq 0 ] || die "$nbad mục LỆCH — không in HOÀN TẤT"
 
 # =============================================================================
-if [ "$ACTION" = uninstall ]; then
-  say ""
-  ok "Xong."
+# Đến đây chắc chắn là CÀI (đường gỡ đã thoát ở trên). Bản đầu còn nhánh
+# `ACTION = uninstall` in "Xong." ở đây — nhưng nhánh đó không bao giờ chạy
+# được, vì uninstall thoát sớm.
+say ""
+say "──────────────────────────────────────────────"
+# --dry KHÔNG BAO GIỜ in "HOÀN TẤT": bản đầu in "HOÀN TẤT" ở chế độ dry,
+# tức "thành công giả" — đọc chữ đó là tin đã xong.
+if [ "$DRY" = 1 ]; then
+  ok "XEM XONG — chưa thay đổi gì cả"
+  say "  chạy thật: sudo bash install.sh --nd-id $ND_ID"
 else
-  say ""
-  say "──────────────────────────────────────────────"
-  # --dry KHÔNG BAO GIỜ in "HOÀN TẤT": bản đầu in "HOÀN TẤT" ở chế độ dry,
-  # tức "thành công giả" — đọc chữ đó là tin đã xong.
-  if [ "$DRY" = 1 ]; then
-    ok "XEM XONG — chưa thay đổi gì cả"
-    say "  chạy thật: sudo bash install.sh --nd-id $ND_ID"
-  else
-    ok "HOÀN TẤT — 3 tầng đã dựng và đã kiểm chứng"
-    say "  backup (duy nhất): $BACKUP"
-    say "  kiểm lại          : sudo bash test/t1-config.sh"
-    say "  mất mạng thì      : sudo bash install.sh --uninstall"
-  fi
-  say "──────────────────────────────────────────────"
+  ok "HOÀN TẤT — 3 tầng đã dựng và đã kiểm chứng"
+  say "  backup (duy nhất): $BACKUP"
+  say "  kiểm lại          : sudo bash test/t1-config.sh"
+  say "  gỡ ra            : sudo bash install.sh --uninstall"
 fi
+say "──────────────────────────────────────────────"
 exit 0

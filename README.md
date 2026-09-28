@@ -92,37 +92,82 @@ thông mạng mà không lọc gì.
 Một chi tiết đáng biết: **key tự lộ ra ID**. Gọi `GET /profiles` với key là ra
 danh sách profile kèm ID, nên nếu lỡ quên ID mà vẫn còn key thì vẫn tìm lại được.
 
-## Cài
+## Cài từ máy trắng
+
+Giả định bạn mới cài Arch hoặc CachyOS, chưa có zapret2, chưa có NextDNS, chưa có
+gì cả. Ba bước, theo đúng thứ tự.
+
+### Bước 1 — Tạo profile NextDNS
+
+Làm trước khi cài gì cả, vì bạn cần lấy ID ở đây.
+
+1. Vào <https://my.nextdns.io>, đăng ký nếu chưa có, tạo một profile.
+2. Trong profile mới, bật hai công tắc này: **Threat Intelligence Feeds** và
+   **AI Threat Detection**. Hai cái này quyết định gần như hết kết quả — tắt đi
+   thì phần lớn chặn biến mất.
+3. Lấy **Profile ID**: <https://my.nextdns.io> → Settings → General. Đó là 6 ký
+   tự hex, ví dụ `785fad`.
+
+ID này là thứ **duy nhất** bạn cần để hệ thống chạy. Xem mục
+[Cần ID hay API key?](#cần-id-hay-api-key).
+
+### Bước 2 — Cài repo
 
 ```bash
+sudo pacman -S --needed git        # chỉ cần git; phần còn lại script tự cài
 git clone https://github.com/slimulv1/zapret2-dotfile.git
 cd zapret2-dotfile
-sudo bash install.sh --nd-id ABC123 --dry     # xem trước, không sửa gì
-sudo bash install.sh --nd-id ABC123           # cài thật
 ```
 
-`--nd-id` là ID profile NextDNS, 6 ký tự hex, lấy ở
-<https://my.nextdns.io> → Settings → General. Máy chưa có zapret2 thì script tự
-cài luôn.
+### Bước 3 — Chạy installer
 
-Muốn có phần kiểm tra ID thì đặt API key ở `/root/.config/nextdns/api.key`,
-quyền 600 — cách đặt ở mục [Về API key](#về-api-key) bên dưới. Key ở chỗ khác thì
-chỉ định bằng `--nd-key /đường/dẫn`.
+Xem trước đã, không sửa gì:
 
-Trước khi sửa gì, script chụp lại trạng thái hiện tại vào
+```bash
+sudo bash install.sh --nd-id 785fad --dry
+```
+
+Đọc hết 9 bước, thấy `XEM XONG` rồi hãy chạy thật:
+
+```bash
+sudo bash install.sh --nd-id 785fad
+```
+
+Script tự làm hết phần còn lại:
+
+| việc | chi tiết |
+|---|---|
+| cài gói còn thiếu | `nftables` `ufw` `networkmanager` `procps-ng` `iproute2` `git` `make` `gcc`, rồi 5 thư viện lúc chạy: `libnetfilter_queue` `libnfnetlink` `libmnl` `luajit` `zlib` |
+| dựng tầng 1 | clone zapret2 ở tag `v1.0.5.2` rồi `make all` ra `nfq2/nfqws2` |
+| đặt tầng 2 | ghi `resolved.conf`, tắt DNS của router trên mọi profile, trỏ `resolv.conf` vào stub |
+| đặt tầng 2b + 3 | 20 dòng rule ufw: 8 ALLOW + 8 DENY cho DNS, 4 cho KDE Connect |
+| siết cứng | 18 khoá sysctl qua 3 lớp phòng thủ |
+
+Trước khi sửa bất cứ thứ gì, script chụp trạng thái hiện tại vào
 `/var/backups/zapret2-dotfile/`. Chỉ một bản, tên cố định, lần sau ghi đè.
 
-Kiểm lại bất cứ lúc nào:
+Xong thì kiểm lại:
 
 ```bash
 sudo bash test/t1-config.sh      # 37 mục, chỉ đọc — không sửa gì
 ```
 
-Mất mạng thì gỡ ra:
+### Nên làm thêm: API key để kiểm ID
+
+Không có key thì hệ thống vẫn chạy, chỉ không biết ID bạn đưa có đúng không. Xem
+mục [Về API key](#về-api-key) — đặt xong chạy lại installer một lần là có phần
+kiểm.
+
+### Lỡ mất mạng thì gỡ
 
 ```bash
 sudo bash install.sh --uninstall
 ```
+
+Gỡ 3 tầng, dừng zapret2, xoá 20 dòng rule ufw, rồi **khôi phục tệp cũ từ
+backup** — có trong backup thì trả về, không có nghĩa là trước khi cài nó chưa
+tồn tại nên xoá hẳn. Script tự báo đã xoá được bao nhiêu; nếu thiếu thì nó in
+cảnh báo kèm lệnh để bạn kiểm tay.
 
 ## Ba việc còn lại, phải tự làm
 
