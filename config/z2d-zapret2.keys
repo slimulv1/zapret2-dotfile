@@ -29,9 +29,17 @@ SET_MAXELEM=522288
 # Bỏ dòng này thì máy mới sẽ lấy mặc định 1 ⇒ chỉ bắt IPv4 ⇒ KHÁC máy hiện tại.
 DISABLE_IPV6=0
 
-# Tắt tối ưu luồng của hệ thống. zapret2 mặc định `donttouch` (không đụng).
-# Tài liệu zapret2: "offloading likely breaks traffic shaper" — mà nfqws2 CHÍNH
-# là traffic shaper. `none` = tắt hẳn, khớp máy hiện tại.
+# FLOWOFFLOAD. Giữ `none` để khớp máy hiện tại.
+#
+# ⚠ Quan trọng: với giá trị `none` thì DÙ KHÔNG SAO với mặc định `donttouch`.
+#   common/nft.sh:699 — `nft_apply_flow_offloading` chỉ chạy khi
+#   [ "$FLOWOFFLOAD" = 'software' -o "$FLOWOFFLOAD" = 'hardware' ].
+#   `none` và `donttouch` đều không thỏa, nên zapret2 không tạo flowtable nào.
+#   Cũng không có mã nào tắt flow offloading của hệ thống cho trường hợp
+#   `none` — mô tả trong install_easy.sh ("none = always disable system flow
+#   offloading") chưa được hiện thực hoá ở bản này.
+#   Nên dòng này là để CẤU HÌNH KHỚP MÁY HIỆN TẠI, không phải vì nó đổi hành vi.
+#   Nếu sau này zapret2 hiện thực hoá khác biệt này thì dòng này có tác dụng.
 FLOWOFFLOAD=none
 
 # -----------------------------------------------------------------------
