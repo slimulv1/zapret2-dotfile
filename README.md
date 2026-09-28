@@ -145,11 +145,60 @@ profile của bạn đang chặn:
 dig +short <tên miền đó>     # 0.0.0.0 là đúng · IP thật là đang hỏng
 ```
 
-**Đặt đường mặc định.** Hệ thống này chỉ được đo trên cáp, nhưng NetworkManager
-mặc định lại ưu tiên wifi, nên lưu lượng sẽ chạy nhầm qua wifi. Cần tự đặt
-`ipv4.route-metric` cho từng profile. Một chỗ dễ hiểu sai: hạ riêng metric của
-profile cáp thì vô dụng, vì NetworkManager cộng thêm 20000 vào metric của profile
-có `autoconnect-priority` thấp hơn.
+**Đặt đường mặc định.** Khi cáp và wifi cùng mở, máy phải chọn lưu lượng đi đường
+nào. Linux so sánh bằng **metric**: số nhỏ hơn thì thắng.
+
+Trên máy này wifi là hotspot điện thoại. NetworkManager liên tục thử xem mỗi
+kết nối có ra được Internet thật không, rồi xếp hạng:
+
+```
+cáp   enp8s0   full       ra được Internet bình thường
+wifi  wlan0    limited    bị hạn chế
+```
+
+Theo tài liệu NetworkManager, **kết nối không ở trạng thái `full` bị cộng thêm
+20000 vào metric**. Đó là lý do wifi đặt 50000 mà bảng định tuyến lại ghi
+70000:
+
+| | đặt trong profile | metric thật |
+|---|---|---|
+| cáp | 100 | 100 |
+| wifi | 50000 | 50000 **+ 20000** = 70000 |
+
+Cáp thắng, và thắng rộng.
+
+Một chỗ dễ đoán sai: phần 20000 đó **không** đến từ `autoconnect-priority`. Đảo
+priority của hai profile theo cả hai chiều thì metric không nhúc nhích. Nó đến
+từ kết quả kiểm tra kết nối, không liên quan gì tới priority.
+
+Vì sao vẫn nên đặt? Để có hai lớp thay vì một. Nếu hotspot đổi thành WiFi nhà và
+NM xếp nó thành `full`, phần phạt 20000 biến mất; lúc đó wifi còn 50000, vẫn thua
+cáp. Còn nếu để trống, NM tự chọn 600 cho wifi, vẫn thua nhưng chỉ hơn 600, mong
+manh hơn nhiều.
+
+Đặt cho cả IPv4 lẫn IPv6:
+
+```bash
+nmcli connection modify "profile cáp"  ipv4.route-metric 100   ipv6.route-metric 100
+nmcli connection modify "profile wifi" ipv4.route-metric 50000 ipv6.route-metric 50000
+```
+
+**Sửa xong phải reapply thì mới có hiệu lực.** `nmcli connection modify` một mình
+chỉ ghi vào profile, route đang chạy không đổi:
+
+```bash
+nmcli device reapply enp8s0
+nmcli device reapply wlan0
+```
+
+Kiểm lại:
+
+```bash
+ip -4 route show default
+```
+
+Phải thấy metric của cáp nhỏ hơn nhiều. Sửa profile mà quên reapply thì dòng này
+vẫn ra số cũ.
 
 **Ghim DoH cho trình duyệt.** Tường DNS chặn cổng 53 và 853, nhưng DoH (DNS mã
 hoá chạy trên HTTPS) lại dùng cổng 443, cùng cổng với web, nên không có cách nào
