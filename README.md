@@ -18,32 +18,32 @@ Hệ thống này gom mọi câu hỏi tên miền về một nơi duy nhất, v
 │                                                                                    │
 │  KHI BẠN MỞ MỘT TRANG WEB                                                          │
 │                                                                                    │
-│  ①  TẦNG 2 · NextDNS qua DoT                                                       │
+│  [1]  TẦNG 2 · NextDNS qua DoT                                                     │
 │      Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn tuỳ                │
 │      danh sách nằm trên đám mây của bạn.                                           │
 │                                                                                    │
-│      ◀ ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                        │
+│      << ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                       │
 │      Danh sách chặn nằm trên đám mây chứ không nằm trong máy,                      │
 │      nên phần cài đặt bên dưới không tự làm được bước này.                         │
 │                                                                                    │
-│  ②  TẦNG 1 · zapret2 · desync                                                      │
+│  [2]  TẦNG 1 · zapret2 · desync                                                    │
 │      Mở kết nối tới IP vừa nhận được. Cắt gói đầu của kết nối                      │
 │      HTTPS thành hai đoạn, đoạn đầu chỉ mang 1 byte. Bộ lọc của                    │
 │      nhà mạng cần nguyên gói đó để đọc tên miền, nên không khớp                    │
 │      mẫu nào và cho qua.                                                           │
 │                                                                                    │
 │      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                     │
-│      miền bị chặn ở bước ① thì không có kết nối nào để mà sửa                      │
-│      ở bước ②.                                                                     │
+│      miền bị chặn ở bước [1] thì không có kết nối nào để mà sửa                    │
+│      ở bước [2].                                                                   │
 │                                                                                    │
 │  KHI CÓ AI GỌI TỚI MÁY BẠN                                                         │
 │                                                                                    │
-│  ③  TẦNG 3 · ufw · chặn INPUT                                                      │
+│  [3]  TẦNG 3 · ufw · chặn INPUT                                                    │
 │      Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.                      │
 │                                                                                    │
 │  LUÔN LUÔN BẬT, MỌI LÚC MỞ MÁY                                                     │
 │                                                                                    │
-│  ④  TẦNG 2b · ufw · tường chặn DNS                                                 │
+│  [4]  TẦNG 2b · ufw · tường chặn DNS                                               │
 │      Chỉ cho phép hỏi NextDNS ở cổng 53 và 853, chặn mọi nơi hỏi                   │
 │      DNS khác — cả IPv4 lẫn IPv6.                                                  │
 └────────────────────────────────────────────────────────────────────────────────────┘
@@ -51,7 +51,7 @@ Hệ thống này gom mọi câu hỏi tên miền về một nơi duy nhất, v
 
 Vì **chỉ tầng 2 quyết định chặn**, nên tầng 1 là lưới an toàn chứ không phải
 thứ đang cứu truy cập. Nó sửa gói tin, chứ không tạo ra gói tin — mà tên miền
-bị chặn ở bước ① thì không có kết nối nào để mà sửa ở bước ②.
+bị chặn ở bước [1] thì không có kết nối nào để mà sửa ở bước [2].
 
 ## Đo được
 

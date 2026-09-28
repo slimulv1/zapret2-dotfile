@@ -35,6 +35,13 @@ secrets.env
 *.log
 *.tmp
 
+# ---- PYTHON ----
+# File bytecode bien dich. Da lot vao git mot lan: test/__pycache__/check-
+# diagram.cpython-314.pyc — rac, va khong bao gio can.
+__pycache__/
+*.pyc
+*.pyo
+
 # ---- RÁC -----------------------------------------------------------------
 .DS_Store
 Thumbs.db

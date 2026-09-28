@@ -17,16 +17,16 @@ Không có gì ở đây là suy đoán. Ngày đo: **2026-09-28**, máy ở **A
     └────────────┬─────────────┘
                  │
     ┌────────────▼─────────────┐
-    │  TẦNG 2 · NextDNS (DoT)  │  ◀── TẦNG DUY NHẤT QUYẰT ĐỊNH CHẶN
+    │  TẦNG 2 · NextDNS (DoT)  │  <<  TẦNG DUY NHẤT QUYẾT ĐỊNH CHẶN
     │  tên miền bị chặn ở đây  │      nằm trên đám mây, không phải trong máy
     └────────────┬─────────────┘
                  │
     ┌────────────▼─────────────┐
-    │  TẦNG 2b · ufw tường DNS│  chỉ cho hỏi NextDNS, chặn DNS nơi khác
+    │  TẦNG 2b · ufw tường DNS │  chỉ cho hỏi NextDNS, chặn DNS nơi khác
     └────────────┬─────────────┘      ✗ không quyết định chặn
                  │
     ┌────────────▼─────────────┐
-    │  TẦNG 3 · ufw INPUT deny│  chặn theo cổng, trừ KDE Connect
+    │  TẦNG 3 · ufw INPUT deny │  chặn theo cổng, trừ KDE Connect
     └──────────────────────────┘      ✗ không quyết định chặn
 ```
 
