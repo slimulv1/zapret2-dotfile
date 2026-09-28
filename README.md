@@ -7,7 +7,7 @@ Hệ thống mạng 3 tầng cho CachyOS / Arch.
 Ở Việt Nam, phần lớn trang bị chặn bị chặn **theo tên miền**, không phải theo
 địa chỉ IP. Nghĩa là bạn vẫn vào được IP đó từ máy bất kỳ, chỉ cần nhập đúng
 địa chỉ — không có quy tắc nào ở tầng đường truyền chặn được. Chặn kiểu đó chỉ
-nằm ở chỗ hỏi tên miện.
+nằm ở chỗ hỏi tên miền.
 
 Hệ thống này gom mọi câu hỏi tên miền về một nơi duy nhất, và để nơi đó quyết
 định cho đi hay chặn. Toàn bộ nằm trên máy bạn, trừ danh sách chặn nằm trên
@@ -51,7 +51,7 @@ Hệ thống này gom mọi câu hỏi tên miền về một nơi duy nhất, v
 
 Vì **chỉ tầng 2 quyết định chặn**, nên tầng 1 là lưới an toàn chứ không phải
 thứ đang cứu truy cập. Nó sửa gói tin, chứ không tạo ra gói tin — mà tên miền
-bị chặn ở bước 1 thì không có kết nối nào để mà sửa ở bước 2.
+bị chặn ở bước ① thì không có kết nối nào để mà sửa ở bước ②.
 
 ## Đo được
 
