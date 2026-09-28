@@ -138,9 +138,10 @@ Script tự làm hết phần còn lại:
 | việc | chi tiết |
 |---|---|
 | cài gói còn thiếu | `nftables` `ufw` `networkmanager` `procps-ng` `iproute2` `git` `make` `gcc`, rồi 5 thư viện lúc chạy: `libnetfilter_queue` `libnfnetlink` `libmnl` `luajit` `zlib` |
-| dựng tầng 1 | clone zapret2 ở tag `v1.0.5.2` rồi `make all` ra `nfq2/nfqws2` |
+| dựng tầng 1 | clone zapret2 ở tag `v1.0.5.2` rồi `make systemd` ra `nfq2/nfqws2` |
 | đặt tầng 2 | ghi `resolved.conf`, tắt DNS của router trên mọi profile, trỏ `resolv.conf` vào stub |
 | đặt tầng 2b + 3 | 20 dòng rule ufw: 8 ALLOW + 8 DENY cho DNS, 4 cho KDE Connect |
+| chọn đường mặc định | đặt metric cáp `100`, wifi `50000` — xem [mục bên dưới](#đường-mặc-định-cáp-trước-wifi-chỉ-dự-phòng) |
 | siết cứng | 18 khoá sysctl qua 3 lớp phòng thủ |
 
 Trước khi sửa bất cứ thứ gì, script chụp trạng thái hiện tại vào
@@ -169,9 +170,9 @@ backup** — có trong backup thì trả về, không có nghĩa là trước kh
 tồn tại nên xoá hẳn. Script tự báo đã xoá được bao nhiêu; nếu thiếu thì nó in
 cảnh báo kèm lệnh để bạn kiểm tay.
 
-## Ba việc còn lại, phải tự làm
+## Hai việc còn lại, phải tự làm
 
-Cả ba nằm ngoài máy. `install.sh` đọc được cái thứ nhất nhưng không bật được, vì
+Cả hai nằm ngoài máy. `install.sh` đọc được cái thứ nhất nhưng không bật được, vì
 API key chỉ có quyền đọc.
 
 **Bật cấu hình tầng 2 trên đám mây.** Đây là bước dễ bỏ nhất. Script sẽ in ra tên
@@ -190,9 +191,20 @@ profile của bạn đang chặn:
 dig +short <tên miền đó>     # 0.0.0.0 là đúng · IP thật là đang hỏng
 ```
 
-**Đặt đường mặc định.** Khi cáp và wifi cùng mở, máy phải tự chọn lưu lượng đi
-đường nào. Cách Linux quyết định rất đơn giản: mỗi đường mang một con số gọi là
-**metric**, và đường nào có số nhỏ hơn sẽ thắng.
+**Ghim DoH cho trình duyệt.** Tường DNS chặn cổng 53 và 853, nhưng DoH (DNS mã
+hoá chạy trên HTTPS) lại dùng cổng 443, cùng cổng với web, nên không có cách nào
+chặn riêng mà không chặn cả web. Để trình duyệt tự chọn provider thì nó đi vòng
+khỏi NextDNS. Cách làm ở
+[`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md).
+
+## Đường mặc định: cáp trước, wifi chỉ dự phòng
+
+`install.sh` tự làm phần này, không cần bạn gõ gì. Nhưng nên hiểu vì sao, phòng
+khi sau này bạn tự đổi.
+
+Khi cáp và wifi cùng mở, máy phải tự chọn lưu lượng đi đường nào. Cách Linux quyết
+định rất đơn giản: mỗi đường mang một con số gọi là **metric**, và đường nào có
+số nhỏ hơn sẽ thắng. Installer đặt cáp `100`, wifi `50000`.
 
 Wifi trên máy này là hotspot điện thoại. NetworkManager liên tục thử xem mỗi
 kết nối có ra được Internet thật không, rồi xếp hạng từng đường:
@@ -212,13 +224,18 @@ Tài liệu NetworkManager nói rõ: kết nối không ở mức `full` sẽ b�
 
 Cáp thắng, và thắng rộng — lưu lượng của bạn đi đường cáp, đúng ý.
 
-Chỗ dễ hiểu nhầm nhất là chỗ đó. Phần cộng 20000 **không** đến từ
-`autoconnect-priority`. Có thể kiểm điều đó: nếu nó đến từ priority thì hạ
-priority của wifi xuống sẽ thấy metric nhảy theo. Tôi đã đảo priority của hai
-profile theo cả hai chiều — metric không nhúc nhích. Nó đến từ kết quả kiểm tra
-kết nối, và chỉ biến mất khi NetworkManager xếp wifi lên `full`.
+Khi cáp hỏng, route của cáp biến mất và wifi thành đường mặc định — không cần
+làm gì thêm, Linux tự chuyển. Tôi đã kiểm: đặt metric cáp lên 100000 (cao hơn
+wifi) thì `ip route get 1.1.1.1` trả về `dev wlan0`, tức lưu lượng thật sự đi
+wifi. Đó là trường hợp xấu nhất, và wifi vẫn đứng ra gánh.
 
-Vì vậy cứ đặt thẳng, cho cả IPv4 lẫn IPv6:
+Chỗ dễ hiểu nhầm nhất là phần cộng 20000 đó. Nó **không** đến từ
+`autoconnect-priority`. Có thể kiểm: nếu nó đến từ priority thì hạ priority của
+wifi xuống sẽ thấy metric nhảy theo. Tôi đã đảo priority của hai profile theo cả
+hai chiều — metric không nhúc nhích. Nó đến từ kết quả kiểm tra kết nối, và chỉ
+biến mất khi NetworkManager xếp wifi lên `full`.
+
+Nếu bạn muốn tự chỉnh:
 
 ```bash
 nmcli connection modify "profile cáp"  ipv4.route-metric 100   ipv6.route-metric 100
@@ -231,31 +248,14 @@ còn route đang chạy thì không đổi — đây là chỗ hay tưởng đã
 ```bash
 nmcli device reapply enp8s0
 nmcli device reapply wlan0
-```
-
-Xong thì xem lại:
-
-```bash
 ip -4 route show default
 ```
-
-Phải thấy metric của cáp nhỏ hơn nhiều. Nếu thấy hai số bằng nhau hoặc bằng số
-cũ, nghĩa là quên reapply.
 
 Số 100 và 50000 không có ý nghĩa gì đặc biệt — chỉ cần cách nhau đủ xa. Nếu mai
 bạn đổi hotspot điện thoại thành WiFi nhà và nó lên `full`, phần cộng 20000 biến
 mất, nhưng 50000 vẫn thua 100. Còn nếu để trống, NetworkManager tự chọn 600 cho
 wifi (đo được 20600 = 600 + 20000), vẫn thua nhưng chỉ hơn có 600 — mong manh hơn
 nhiều.
-
-Phải thấy metric của cáp nhỏ hơn nhiều. Sửa profile mà quên reapply thì dòng này
-vẫn ra số cũ.
-
-**Ghim DoH cho trình duyệt.** Tường DNS chặn cổng 53 và 853, nhưng DoH (DNS mã
-hoá chạy trên HTTPS) lại dùng cổng 443, cùng cổng với web, nên không có cách nào
-chặn riêng mà không chặn cả web. Để trình duyệt tự chọn provider thì nó đi vòng
-khỏi NextDNS. Cách làm ở
-[`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md).
 
 ## Về API key
 

@@ -91,6 +91,26 @@ if [ "$n_conn" -eq 0 ]; then skip "ignore-auto-dns" "không có profile nào đa
 else chk "ignore-auto-dns=yes/yes ($n_conn profile)" "$n_auto" 0; fi
 chk "DNS hỏi được" "$(resolvectl query --cache=no github.com >/dev/null 2>&1 && echo ok || echo loi)" ok
 
+# Đường mặc định: cáp phải thắng wifi. Cả 3 tầng chỉ được đo trên cáp, nên
+# lưu lượng lặt qua wifi thì tầng 1 không bao giờ chạy và mọi số đo vô nghĩa.
+# Dùng UUID vì `-t` tách bằng `:` nên tên profile chứa `:` sẽ vỡ.
+n_w=0 n_f=0 n_rm=0
+while IFS=: read -r cu ct; do
+  [ -n "$cu" ] || continue
+  m=$(nmcli -g ipv4.route-metric con show "$cu" 2>/dev/null)
+  case "$ct" in
+    802-3-ethernet)   n_w=$((n_w+1)); [ "$m" = 100 ]   || n_rm=$((n_rm+1)) ;;
+    802-11-wireless)  n_f=$((n_f+1)); [ "$m" = 50000 ] || n_rm=$((n_rm+1)) ;;
+  esac
+done < <(nmcli -t -f UUID,TYPE con show 2>/dev/null)
+if [ "$n_w" -eq 0 ] && [ "$n_f" -eq 0 ]; then
+  skip "route-metric" "nmcli không trả về profile nào"
+elif [ "$n_rm" -eq 0 ]; then
+  chk "route-metric cáp 100 · wifi 50000 ($n_w cáp, $n_f wifi)" 0 0
+else
+  chk "route-metric đúng ($n_w cáp, $n_f wifi)" "$n_rm" 0
+fi
+
 printf '\n%s── TẦNG 2b + 3 — ufw (chặn theo cổng, không quyết định chặn) ──%s\n' "$N" "$N"
 n_al=0; n_d4=0; n_d6=0
 for ip in $ND_V4 $ND_V6; do

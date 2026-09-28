@@ -755,6 +755,61 @@ else
   [ "$n_ok" -eq "${#conns[@]}" ] || die "$(( ${#conns[@]} - n_ok ))/${#conns[@]} profile chưa tắt DNS router"
   ok "ignore-auto-dns=yes/yes trên $n_ok/${#conns[@]} profile"
 
+  # ---- Đường mặc định: cáp trước, wifi chỉ là dự phòng ----
+  # VÌ SAO CẦN: cả 3 tầng chỉ được đo trên cáp. Lưu lượng lặt qua wifi thì
+  # tầng 1 không bao giờ được kích hoạt, và mọi số đo trong README là ứng dụng
+  # cho sai đường.
+  #
+  # CƠ CHẾ CHỈ CÓ MỘT: route-metric. Linux lấy đường có metric NHỎ HƠN.
+  #   cáp 100  ·  wifi 50000  →  cáp thắng
+  # Khi cáp hỏng, route của cáp biến mất và wifi thành đường mặc định — không
+  # cần làm gì thêm. Đã đo: đặt metric cáp lên 100000 (cao hơn wifi) thì
+  # `ip route get 1.1.1.1` trả về `dev wlan0`, tức lưu lượng thật sự chuyển.
+  #
+  # KHÔNG dùng connection.autoconnect-priority ở đây. Tài liệu NM nói rõ nó
+  # "only matters if there are more than one candidate profile to select for
+  # autoconnect". Cáp và wifi nằm ở HAI THIẾT BỊ KHÁC NHAU nên mỗi cái tự
+  # kích hoạt, không tranh chỗ với nhau. Đo: đặt priority cáp 0 → 100 thì bảng
+  # định tuyến và danh sách kết nối active y hệt, không đổi gì.
+  #
+  # Dùng UUID, KHÔNG dùng tên: `nmcli -t` phân tách bằng dấu `:` nên tên profile
+  # chứa `:` sẽ vỡ (nmcli escape thành `test\:colon`, tách ra là `test\` và
+  # `colon`). UUID không bao giờ chứa `:`. Đã kiểm `nmcli con modify <UUID>` nhận.
+  #
+  # `-f` ở chế độ terse CHỈ nhận tên trường NGẮN (UUID, TYPE, NAME…). Tên đầy đủ
+  # như `connection.uuid` chỉ dùng được với `-g`. Bản đầu viết
+  # `-f connection.uuid,connection.type` → nmcli báo lỗi ra stderr, vòng lặp
+  # nhận rỗng, script im lặng bỏ qua rồi chỉ cảnh báo "không thấy profile cáp
+  # nào" — tức cài xong mà không đặt được gì mà vẫn đi tiếp. Giờ thì chết ngay.
+  mapfile -t nm_list < <(nmcli -t -f UUID,TYPE con show 2>/dev/null)
+  [ "${#nm_list[@]}" -gt 0 ] \
+    || die "nmcli không trả về profile nào — không đặt được đường mặc định.
+       Kiểm:  nmcli -t -f UUID,TYPE con show"
+  n_w=0 n_f=0
+  for line in "${nm_list[@]}"; do
+    cu=${line%%:*}; ct=${line#*:}
+    [ -n "$cu" ] || continue
+    case "$ct" in
+      802-3-ethernet)
+        nmcli con modify "$cu" ipv4.route-metric 100 ipv6.route-metric 100 2>/dev/null \
+          && n_w=$((n_w + 1)) || bad "đặt route-metric cho cáp thất bại ($cu)" ;;
+      802-11-wireless)
+        nmcli con modify "$cu" ipv4.route-metric 50000 ipv6.route-metric 50000 2>/dev/null \
+          && n_f=$((n_f + 1)) || bad "đặt route-metric cho wifi thất bại ($cu)" ;;
+    esac
+  done
+  # Không có cáp thì cảnh báo, không chết: máy chỉ có wifi vẫn dùng được, chỉ là
+  # không có gì để "dự phòng".
+  [ "$n_w" -gt 0 ] && ok "$n_w profile cáp: metric 100 (mặc định)" \
+                  || warn "không thấy profile cáp nào — wifi sẽ là đường mặc định"
+  [ "$n_f" -gt 0 ] && ok "$n_f profile wifi: metric 50000 (chỉ dự phòng)"
+  # Cần reapply mới có hiệu lực: `nmcli con modify` chỉ ghi vào profile, route
+  # đang chạy không đổi. Đo trên máy: modify xong, `ip route` vẫn ra metric cũ.
+  for c in "${conns[@]}"; do
+    nmcli device reapply "$(nmcli -g connection.interface-name con show "$c" 2>/dev/null)" >/dev/null 2>&1
+  done
+  ok "route-metric đã nạp lại"
+
   systemctl restart systemd-resolved || die "systemd-resolved không khởi động lại được"
   sleep 1
   resolvectl query --cache=no github.com >/dev/null 2>&1 \
