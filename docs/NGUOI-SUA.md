@@ -32,6 +32,20 @@ dụng.
 chữ `z2d` trong tệp **luôn ra 0 dòng**, dù `ufw status` hiện đủ 20 rule. Mọi kiểm
 phải đi qua `ufw status`, không đọc thẳng tệp.
 
+## 1b. Sơ đồ trong README: sinh bằng script, đừng gõ tay
+
+`python3 test/make-diagram.py` in ra sơ đồ đã căn, kèm tự kiểm.
+`python3 test/check-diagram.py` kiểm README.md, exit 1 nếu lệch.
+
+**Vì sao không gõ tay.** Dấu tiếng Việt là ký tự **tổ hợp** — `ề` gồm `e` +
+dấu, và dấu chiếm **0 cột** hiển thị. Đo bằng `len()` thì mỗi dấu cộng thêm 1,
+nên hai dòng nhìn giống nhau vẫn lệch nhau khi hiển thị. Sơ đồ cũ lệch 3 dòng
+đúng vì lý do này.
+
+Quy tắc kiểm: **mọi dòng trong khối sơ đồ phải cùng độ rộng hiển thị**, và các
+ký tự khung phải ở cùng cột. Dòng có dấu hai chấm bị chừa ra thì tính cả
+phần chừa, không phải chỉ phần khung.
+
 ## 2. Bẫy đo lười
 
 | bẫy | biểu hiện | sửa |
