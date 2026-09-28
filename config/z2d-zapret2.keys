@@ -1,6 +1,20 @@
+# Cấu hình zapret2 — những khoá KHÁC mặc định của zapret2
+#
+# Script chép config.default làm gốc rồi ép đúng những dòng ở đây. Danh sách
+# này là TOÀN BỘ phần khác biệt — có 5 khoá thật sự khác `config.default`:
+#
+#   NFQWS2_ENABLE      0        -> 1     bật nfqws2 (mặc định tắt)
+#   MODE_FILTER        none     -> hostlist
+#   NFQWS2_PORTS_UDP  443      -> rỗng  tắt UDP, chỉ xử lý TCP
+#   DISABLE_IPV6       1        -> 0     BẬT bắt IPv6   ← dễ sót nhất
+#   FLOWOFFLOAD        donttouch-> none   tắt tối ưu luồng
+#
+# Mọi khoá còn lại giữ nguyên theo `config.default` của zapret2, không khoá cứng
+# ở đây — để khi zapret2 đổi mặc định thì ta đi theo, thay vì kẹt ở bản cũ.
+# Đã đối chiếu từng khoá giữa /opt/zapret2/config và config.default trên máy.
 FWTYPE=nftables
-MODE_FILTER=hostlist
 NFQWS2_ENABLE=1
+MODE_FILTER=hostlist
 NFQWS2_PORTS_TCP=80,443
 NFQWS2_PORTS_UDP=
 NFQWS2_TCP_PKT_OUT=20
@@ -8,3 +22,26 @@ NFQWS2_TCP_PKT_IN=10
 DESYNC_MARK=0x40000000
 DESYNC_MARK_POSTNAT=0x20000000
 SET_MAXELEM=522288
+
+# BẬT bắt IPv6. zapret2 mặc định TẮT (DISABLE_IPV6=1) — nghĩa là nfqws2 không
+# đụng vào lưu lượng IPv6, và bảng nft không sinh dòng `nfproto ipv6`.
+# Máy này bắt cả hai họ: nft có 2 rule `meta nfproto ipv6 ... queue to 300`.
+# Bỏ dòng này thì máy mới sẽ lấy mặc định 1 ⇒ chỉ bắt IPv4 ⇒ KHÁC máy hiện tại.
+DISABLE_IPV6=0
+
+# Tắt tối ưu luồng của hệ thống. zapret2 mặc định `donttouch` (không đụng).
+# Tài liệu zapret2: "offloading likely breaks traffic shaper" — mà nfqws2 CHÍNH
+# là traffic shaper. `none` = tắt hẳn, khớp máy hiện tại.
+FLOWOFFLOAD=none
+
+# -----------------------------------------------------------------------
+#  KHÔNG ép hai khoá này, dù config.default có:
+#      NFQWS2_UDP_PKT_OUT=5
+#      NFQWS2_UDP_PKT_IN=3
+#  Máy hiện tại không có hai dòng đó. Cũng không cần: NFQWS2_PORTS_UDP rỗng ở
+#  trên, mà common/nft.sh xử lý thế này:
+#      nft_apply_nfqws_in_out() { ... [ -n "$2" ] || return; ... }
+#  $2 chính là NFQWS2_PORTS_UDP. Rỗng là return ngay, hai giá trị PKT_OUT/PKT_IN
+#  chưa bao giờ được đọc tới. Đo trên máy: bảng inet zapret2 có 0 rule "udp dport".
+#  Cấu hình sinh ra vì vậy dư hai dòng chết so với máy, nhưng TƯƠNG ĐƯƠNG CHỨC
+#  NĂNG — đã so từng khoá, chỉ lệch đúng hai dòng này.

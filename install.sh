@@ -580,41 +580,90 @@ step "3/9 · TẦNG 1 — zapret2"
 if [ -x "$ZAPRET_DIR/nfq2/nfqws2" ]; then
   ok "$ZAPRET_DIR đã có sẵn"
 elif [ "$DRY" = 1 ]; then
-  ok "[dry] sẽ clone $ZAPRET_REPO rồi build"
+  ok "[dry] sẽ cài gói build, clone $ZAPRET_TAG rồi 'make systemd'"
 else
-  # KHÔNG cần `go`. Bản đầu có trong danh sách: nfq2 là C thuần (29 file .c,
-  # 0 file .go) nên Go vô dụng ở đây — và `go` là gói nặng, cài thừa mất hàng
-  # trăm MB. Bỏ đi.
+  # ---- 1. CÀI GÓI, PHẢI TRƯỚC KHI BUILD ----
+  # KHÔNG cài sau. Bản đầu kiểm 5 thư viện SAU khi build, sai thứ tự: nfq2/Makefile
+  # dùng chúng ở cả lúc BIÊN DỊCH lẫn lúc LIÊN KẾT
+  #   LIBS_LINUX = -lz -lnetfilter_queue -lnfnetlink -lmnl -lm
+  # Trên Arch, gói runtime cũng chứa header (không tách -dev như Debian), nên thiếu
+  # gói ⇒ make fail NGAY, chẳng bao giờ tới bước kiểm thư viện phía sau.
+  #   git      : clone repo
+  #   make gcc : biên dịch (nfq2 là C thuần: 29 file .c, 0 file .go — KHÔNG cần go)
+  #   pkgconf  : pkg-config tìm luajit. Thiếu vẫn build được nhờ fallback trong
+  #              Makefile (/usr/lib/libluajit-5.1.*), nhưng có pkgconf thì chắc chắn
+  #   zlib libnetfilter_queue libnfnetlink libmnl luajit : theo LIBS_LINUX + Lua
+  #   curl     : zapret2 tự liệt kê là điều kiện (check_prerequisites_linux), và
+  #              chính install.sh cũng dùng curl ở nd_check
+  need_pkgs git make gcc pkgconf zlib libnetfilter_queue libnfnetlink libmnl luajit curl
+
+  # ---- 2. CLONE ----
+  # KHÔNG cần `go`: nfq2 là C thuần. Bản đầu có `go` trong danh sách gói build —
+  # vô dụng ở đây và nặng hàng trăm MB.
   rm -rf "$ZAPRET_DIR"
   git clone --depth 1 --branch "$ZAPRET_TAG" "$ZAPRET_REPO" "$ZAPRET_DIR" \
     || die "git clone thất bại — kiểm mạng rồi thử lại"
-  # `make nfq` KHÔNG tồn tại: Makefile của zapret2 chỉ có all · systemd ·
-  # android · bsd · clean. Chạy `make nfq` được "No rule to make target 'nfq'".
-  # Và vì có thư mục tên `nfq`… ở repo khác, `make nfq` còn có thể báo
-  # "Nothing to be done" — tức im lặng không build gì cả. Dùng `all`.
-  make -C "$ZAPRET_DIR" all >/dev/null 2>&1 \
-    || die "build thất bại. Xem lỗi: cd /tmp && git clone --depth 1 --branch $ZAPRET_TAG $ZAPRET_REPO z && cd z && make all"
+
+  # ---- 3. BUILD ----
+  # Target `systemd`, KHÔNG phải `all`. Đây là điểm bản đầu sai.
+  #
+  #   Makefile zapret2 chỉ có: all · systemd · android · bsd · clean.
+  #   `make nfq` không tồn tại → "No rule to make target 'nfq'. Stop."
+  #   Riêng `make all` thì build được, NHƯNG cho binary KHÔNG có sd_notify.
+  #
+  #   Target `systemd` thêm -DUSE_SYSTEMD + -lsystemd, khiến nfqws2 tự gọi
+  #   sd_notify(0, "READY=1") (nfqws.c:435). Đo trên máy này:
+  #       binary đang chạy : sd_notify=1  READY=1=1  288768 byte
+  #       build bằng `all` : sd_notify=0  READY=1=0  232216 byte
+  #   Tức binary đang chạy do build `systemd`. Installer chính thức của zapret2
+  #   cũng vậy — install_easy.sh đặt make_target=systemd khi SYSTEM=systemd.
+  #   Dùng `all` là lệch cả máy lẫn upstream.
+  #
+  # Cờ build y hệt install_easy.sh: OPTIMIZE=-O2 CFLAGS=-march=native.
+  #   Makefile mặc định OPTIMIZE=-Os (ưu tiên nhỏ), installer chính thức đổi sang
+  #   -O2 vì nfqws2 nằm trên đường dữ liệu, tốc độ quan trọng hơn kích thước.
+  #   -march=native tinh chỉnh cho CPU của máy đang cài (build tại chỗ nên hợp lệ).
+  CFLAGS="-march=native" OPTIMIZE=-O2 make -C "$ZAPRET_DIR" systemd >/dev/null 2>&1 || {
+    echo "  --- log build ---" >&2
+    CFLAGS="-march=native" OPTIMIZE=-O2 make -C "$ZAPRET_DIR" systemd 2>&1 | tail -20 >&2
+    die "build thất bại (xem log trên)"
+  }
   [ -x "$ZAPRET_DIR/nfq2/nfqws2" ] || die "build xong nhưng không thấy nfq2/nfqws2"
-  ok "đã build nfq2/nfqws2 ($ZAPRET_TAG)"
+  # Kiểm đúng target, không chỉ kiểm "binary tồn tại": `all` cũng cho binary tồn
+  # tại, chỉ khác ở chỗ không có sd_notify.
+  if nm -D "$ZAPRET_DIR/binaries/my/nfqws2" 2>/dev/null | grep -q sd_notify; then
+    ok "đã build nfq2/nfqws2 ($ZAPRET_TAG, target systemd, có sd_notify)"
+  else
+    die "binary không có sd_notify — build sai target, phải là 'systemd' chứ không phải 'all'"
+  fi
 
-  # 5 thư viện lúc CHẠY. Thiếu thì build vẫn xong, service chết lúc start với
-  # "error while loading shared libraries" — lỗi không nói ra nguyên nhân.
-  need_libs libnetfilter_queue.so.1 libnetfilter_queue \
-            libnfnetlink.so.0    libnfnetlink \
-            libmnl.so.0          libmnl \
-            libluajit-5.1.so.2   luajit \
-            libz.so.1            zlib
-  ok "thư viện lúc chạy: đủ 5"
+  # ---- 4. THƯ VIỆN LÚC CHẠY ----
+  # Đã cài ở bước 1 vì cần cho build. Ở đây chỉ XÁC NHẬN: nếu gói lỡ bị gỡ
+  # giữa hai lúc, service sẽ chết lúc start với "error while loading shared
+  # libraries" — lỗi không nói ra nguyên nhân.
+  # Tên biến khác `miss` vì `miss` đã là MẢNG trong need_pkgs/need_libs; dùng
+  # lại ở đây khiến shellcheck báo SC2178 và dễ gây lỗi khi sửa tiếp.
+  n_lib=0; ten_lib=""
+  for lib in libnetfilter_queue.so.1 libnfnetlink.so.0 libmnl.so.0 \
+             libluajit-5.1.so.2 libz.so.1; do
+    ldconfig -p 2>/dev/null | grep -qF "$lib" || { n_lib=$((n_lib+1)); ten_lib="$ten_lib $lib"; }
+  done
+  [ "$n_lib" -eq 0 ] && ok "thư viện lúc chạy: đủ 5" \
+    || die "thiếu thư viện lúc chạy:$ten_lib
+       sudo pacman -S libnetfilter_queue libnfnetlink libmnl luajit zlib"
 
-  # ---- systemd unit ----
+  # ---- 5. SYSTEMD UNIT ----
   # Bản đầu KHÔNG copy unit, chỉ gọi `systemctl enable`/`restart`. Trên máy mới
-  # thì không có unit nào để enable, `systemctl restart` chết, và tầng 1 mất.
+  # thì không có unit để enable, `systemctl restart` chết, và tầng 1 mất.
   # Máy đang chạy có unit ở /usr/lib/systemd/system/ do cài tay từ trước, nên
   # bản đầu chạy trơn và lỗi này không lộ.
   #
   # Cài vào /etc/systemd/system/ (đúng chỗ dành cho unit cục bộ), đè lên bản
   # trong /usr/lib nếu có. File lấy từ chính repo đã ghim, không tự viết tay —
   # ExecStart trỏ vào init.d/sysv/zapret2, tức nơi binary vừa dựng xong.
+  #
+  # Đây cũng là 3 unit mà install_easy.sh cài (service_install_systemd +
+  # timer_install_systemd).
   n_unit=0
   for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
     src="$ZAPRET_DIR/init.d/systemd/$u"
