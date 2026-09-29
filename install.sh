@@ -19,7 +19,11 @@ REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # mục kiểm chứng; ghi cứng "install.sh" sẽ vỡ ngay khi file bị đổi tên.
 SELF="$REPO_DIR/$(basename "${BASH_SOURCE[0]}")"
 CONF="$REPO_DIR/config"
-BACKUP=/var/backups/zapret2-dotfile
+# Thư mục cha của bản sao lưu. Tách ra để chỗ tạo (bước 2) và chỗ dọn (trap)
+# cùng đọc một nguồn — gõ thẳng `/var/backups` ở hai chỗ thì sửa một bên là
+# lệch.
+BACKUP_PARENT=/var/backups
+BACKUP=$BACKUP_PARENT/zapret2-dotfile
 Z2D_SYSCTL=/etc/ufw/z2d-sysctl.conf
 ZAPRET_DIR=/opt/zapret2
 ZAPRET_REPO=https://github.com/bol-van/zapret2
@@ -695,7 +699,6 @@ if [ "$ACTION" = install ]; then
   #   git, make, gcc: clone + build zapret2
   need_pkgs nftables ufw networkmanager procps-ng iproute2 git make gcc
   ok "đủ lệnh cần thiết"
-ok "đủ lệnh cần thiết"
   # Kiểm đủ TẬP config cần thiết, ngay ở bước 1.
   #
   #   Bản đầu không kiểm. Đo được: xoá `config/z2d-exclude.txt` rồi chạy
@@ -747,8 +750,40 @@ step "2/8 · SAO LƯU VÀO $BACKUP"
 if [ "$DRY" = 1 ]; then
   ok "[dry] sẽ ghi đè $BACKUP"
 else
-  st=$(mktemp -d /var/backups/.z2d.XXXXXX) \
-    || die "không tạo được thư mục tạm trong /var/backups — hãy kiểm tra dung lượng và quyền"
+  # ---- TẠO /var/backups NẾU CHƯA CÓ ----
+  #
+  #   `/var/backups` là quy ước của Debian, Arch/CachyOS KHÔNG có sẵn.
+  #   `mktemp -d /var/backups/.z2d.XXXXXX` chỉ tạo TÊN cuối, KHÔNG tạo thư mục
+  #   cha — thiếu cha thì mktemp chết và bước 2 dừng im lặng, đúng thứ KHÔNG
+  #   được: mất cả đường quay lại trước khi đụng gì.
+  #   Đo được trên CachyOS thật: `install.sh` chết ngay ở đây với
+  #   "mktemp: failed to create directory via template '/var/backups/.z2d.XXXXXX'",
+  #   trong khi bước 1 báo "OK đủ 12 tệp config" — người dùng tưởng máy ổn.
+  #
+  #   Quyền 700 root:root như Debian: trong đó là bản sao /etc của máy
+  #   (khoá API, cấu hình ufw) — user thường KHÔNG được đọc.
+  #
+  #   Đã tồn tại thì ĐỪNG đụng quyền: `/var/backups/pacman` của gói pacman
+  #   cũng nằm trong đó, và có bản phân phối đặt 755 — đổi là việc ngoài
+  #   phạm vi script này. Chỉ khi ta tự tạo mới khoá 700.
+  #
+  #   `-d` kèm `install`: tạo cả cây, và chmod CHỈ áp lên thư mục vừa tạo —
+  #   `mkdir -p` mặc định 755 (umask), tức bản sao lưu lọt cho mọi user đọc.
+  #   Script chạy dưới sudo, nên KHÔNG gọi `sudo` bên trong (sudo lồng sudo
+  #   cần NOPASSWD, và mất ngữ cảnh nếu không có).
+  if [ ! -d "$BACKUP_PARENT" ]; then
+    install -d -m 700 -o root -g root "$BACKUP_PARENT" \
+      || die "không tạo được $BACKUP_PARENT — kiểm tra $BACKUP_PARENT có phải
+        TỆP THẬT không (máy khác đã đặt sai), và ổ đĩa còn trống không.
+        Nếu nó là tệp: sudo rm -f $BACKUP_PARENT rồi chạy lại."
+    ok "đã tạo $BACKUP_PARENT (700 root:root)"
+  fi
+  [ -w "$BACKUP_PARENT" ] \
+    || die "$BACKUP_PARENT không ghi được — chạy bằng sudo, và kiểm tra
+        chế độ (ls -ld $BACKUP_PARENT). Script này cần ghi ở đó trước khi
+        đụng bất cứ thứ gì trên máy."
+  st=$(mktemp -d "$BACKUP_PARENT"/.z2d.XXXXXX) \
+    || die "không tạo được thư mục tạm trong $BACKUP_PARENT — hãy kiểm tra dung lượng và quyền"
   # `mktemp` hỏng mà không kiểm thì `st` RỖNG, và `mkdir -p "$st/etc/..."` sẽ
   # tạo nhầm trong chính /etc. Lỗi này bị che vì `mkdir` chạy thành công.
   #
@@ -757,12 +792,12 @@ else
   # trong /var/backups. Sau khi `mv` xong, $st không còn tồn tại ⇒ trap vô hại.
   #   CHỈ xoá khi tên khớp ĐÚNG mẫu của mktemp — `rm -rf` với biến rỗng là
   #   bi kịch, nên không được bỏ chặt kiểm tra này.
-  st_gc() { case "${st:-}" in /var/backups/.z2d.*) rm -rf -- "$st" ;; esac; }
+  st_gc() { case "${st:-}" in "$BACKUP_PARENT"/.z2d.*) rm -rf -- "$st" ;; esac; }
   trap st_gc EXIT
 
   # BẮT TÍN HIỆU. `trap ... EXIT` một mình là chưa đủ.
   #
-  #   Đo bằng pty thật (đúng cách Ctrl-C gửi ):
+  #   Đo bằng pty thật (đúng cách Ctrl-C gửi ):
   #     bản cũ — chỉ có `trap … EXIT`:
   #         in "BUOC-A" → Ctrl-C → DỪNG, không in gì thêm → exit 0
   #     bản mới — có `trap … INT TERM`:
@@ -943,7 +978,9 @@ else
   nft list ruleset   > "$st/nft-ruleset.txt"   2>/dev/null || true
   { echo "Sao lưu chuẩn — $(date -Is)"
     echo "Phục hồi: sudo bash install.sh --uninstall"; } > "$st/BAO-GHI.txt"
-  rm -rf "$BACKUP"; mkdir -p "$(dirname "$BACKUP")"; mv "$st" "$BACKUP" \
+  # `$BACKUP_PARENT` chắc chắn đã có (đầu bước 2 tạo nếu thiếu) ⇒ không cần
+  # mkdir ở đây nữa; giữ lại thì lần nữa cũng ghi đè ngầm ý định tạo ở trên.
+  rm -rf "$BACKUP"; mv "$st" "$BACKUP" \
     || die "không chuyển được $st thành $BACKUP — bản sao lưu cũ đã bị xoá, kiểm $st"
   trap - EXIT   # $st đã thành $BACKUP; tắt trap dọn để không xoá nhầm bản sao lưu
   ok "đã ghi $BACKUP ($(find "$BACKUP" -type f | wc -l) file)"
