@@ -988,12 +988,36 @@ step "9/9 · KIỂM CHỨNG CUỐI"
 # thúc ở dòng "9/9", không có dòng nào báo đã xem xong. Nhánh `if [ "$DRY" = 1 ]`
 # ở cuối file trở thành code chết. Đo: --dry in "XEM XONG" 0 lần.
 nbad=0
-# BẪY ĐÃ DÍNH: (a) `grep -c ... || echo 0` in "0" RỒI trả 1 nên `||` in thêm
-# "0" nữa → "0\n0" và dòng báo LỆCH dù máy đúng; (b) lookbehind biến thiên
-# `(?<=X\s*=\s*)` bị PCRE từ chối — dùng \K.
+# BẪY ĐÃ DÍNH Ở chính chỗ này: (a) `grep -c ... || echo 0` in "0" RỒI trả 1
+# nên `||` in thêm "0" nữa → "0\n0" và dòng báo LỆCH dù máy đúng;
+# (b) lookbehind biến thiên `(?<=X\s*=\s*)` bị PCRE từ chối — dùng \K.
+#
+#   `printf '%-32s'` của bash LUÔN đệm theo BYTE, kể cả khi LC_CTYPE là UTF-8.
+#   Nhãn tiếng Việt có dấu thì 1 ký tự chiếm 2 byte, nên cột bị hụt:
+#   đo được "tiến trình nfqws2" = 17 ký tự = 20 byte ⇒ thiếu 3 cột, còn
+#   "policy incoming" = 15 ký tự = 15 byte ⇒ đủ 32. Cột lệch tới 3 ký tự ở
+#   NGAY BẢN GỐC, không phải do thêm nhãn mới.
+#
+#   Cách sửa: đặt LC_ALL C.UTF-8 để `${#1}` đếm KÝ TỰ (17 thay vì 20), rồi tự
+#   tính số khoảng trắng. Đặt `local` để chỉ có tác dụng trong hàm này — đặt
+#   ở cấp script sẽ đổi cả thứ tự `sort`, mà `sort` đang dùng để so hai danh
+#   sách ở bước 4 (dù cùng locale thì vẫn so được, nhưng đừng thêm rủi ro).
 chk() {
-  if [ "$2" = "$3" ]; then printf '  %sOK%s    %-32s %s\n' "$C_G" "$C_0" "$1" "$2"
-  else printf '  %sLỆCH%s  %-32s thực tế=[%s] mong đợi=[%s]\n' "$C_R" "$C_0" "$1" "$2" "$3"; nbad=$((nbad+1)); fi
+  local LC_ALL=C.UTF-8 sp n
+  # Mọi nhãn đều đi qua đây, nên đặt chốt ở chỗ này là đủ — không cần chốt
+  # riêng cho từng nhãn, và `--dry` cũng được kiểm vì chk chạy ở cả hai nhánh.
+  # (Bản đầu đặt chốt cạnh nhãn route-metric: `--dry` không đi tới đó vì cả
+  # khối nằm trong nhánh không-dry, nên thử với nhãn 51 ký tự thì --dry vẫn
+  # exit 0 — chốt không có tác dụng gì. Đo được.)
+  [ "${#1}" -le 32 ] || { bad "nhãn quá dài: ${#1} ký tự (tối đa 32) — $1"; nbad=$((nbad+1)); return; }
+  n=$(( 32 - ${#1} ))
+  printf -v sp '%*s' "$n" ''
+  if [ "$2" = "$3" ]; then
+    printf '  %sOK%s    %s%s %s\n' "$C_G" "$C_0" "$1" "$sp" "$2"
+  else
+    printf '  %sLỆCH%s  %s%s thực tế=[%s] mong đợi=[%s]\n' "$C_R" "$C_0" "$1" "$sp" "$2" "$3"
+    nbad=$((nbad+1))
+  fi
 }
 # Số mục SUY RA TỪ CHÍNH KHỐI NÀY, không viết cứng. Bản đầu ghi "14 mục", thêm
 # một mục thành 15 mà quên sửa — cùng kiểu lỗi với "10 khoá" ở bước 4.
@@ -1035,10 +1059,10 @@ done < <(nmcli -t -f UUID,TYPE con show 2>/dev/null)
 # nhau khiến số dòng `chk` trong khối này nhiều hơn số mục thật sự chạy, và
 # bộ đếm bên dưới sẽ báo sai. Rút nhãn/giá trị ra biến, gọi chk đúng một lần.
 if [ "$n_rm_seen" -eq 0 ]; then
-  n_rm_lbl="route-metric (đọc được 0 profile)"
+  n_rm_lbl="route-metric (0 profile)"
   n_rm_val="không đọc được profile nào"; n_rm_exp="cần thấy cáp và wifi"
 else
-  n_rm_lbl="route-metric cáp 100 · wifi 50000"
+  n_rm_lbl="route-metric cáp 100 · wifi 50k"
   n_rm_val="$n_rm_bad"; n_rm_exp=0
 fi
 chk "$n_rm_lbl" "$n_rm_val" "$n_rm_exp"

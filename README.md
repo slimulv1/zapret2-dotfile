@@ -150,8 +150,12 @@ Trước khi sửa bất cứ thứ gì, script chụp trạng thái hiện tạ
 Xong thì kiểm lại:
 
 ```bash
-sudo bash test/t1-config.sh      # 37 mục, chỉ đọc — không sửa gì
+sudo bash test/t1-config.sh      # chỉ đọc — không sửa gì
 ```
+
+Dòng cuối in ra `đạt N · LỆCH M` — N là số mục, M là số mục lệch. Bản này
+không ghi N cứng trong tài liệu vì số mục thay đổi theo máy; cứ ghi thì sẽ
+lệch, y như lần trước.
 
 ### Nên làm thêm: API key để kiểm ID
 
