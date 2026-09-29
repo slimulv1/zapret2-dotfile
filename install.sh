@@ -35,6 +35,13 @@ ZAPRET_REPO=https://github.com/bol-van/zapret2
 #   8 khoá NFQWS2_ trong config.default, `make systemd` ra nfq2/nfqws2 chạy được
 #   (có sd_notify — xem giải thích ở bước 3).
 ZAPRET_TAG=v1.0.5.2
+# Mẫu để đếm "còn sót bao nhiêu unit zapret2". Dùng chung cho cảnh báo trong
+# uninstall() để không mỗi nơi lại viết riêng một chuỗi rồi lệch nhau.
+# `.*` chứ không phải `(-list-update)?`: zapret2 còn có `zapret2-bc2.service`
+# (unit thử blockcheck2) — mẫu hẹp KHÔNG khớp nó, nên cảnh báo im lặng đúng
+# lúc còn sót. Đo được: đã cố tình để lại zapret2-bc2.service rồi chạy
+# uninstall, nó vẫn báo OK.
+RE_UNIT_BASE='^zapret2.*\.(service|timer)[[:space:]]'
 
 ND_ID=""; DRY=0; ACTION=install
 ND_KEY=""                       # rỗng = tự dò. Xem nd_key_path.
@@ -123,14 +130,41 @@ uninstall() {
 
   step "GỞ · dừng zapret2"
   if [ "$D" = 1 ]; then
-    say "    [dry] dừng + bỏ tự khởi động zapret2, xoá 3 unit ở /etc/systemd/system/"
+  say "    [dry] dừng zapret2, xoá 3 unit ở CẢ /etc và /usr/lib/systemd/system/"
+else
+  systemctl disable --now zapret2 >/dev/null 2>&1
+  # Xoá ở CẢ HAI chỗ, không chỉ /etc.
+  #
+  #   Bản đầu chỉ xoá /etc/systemd/system/. Nhưng bản build zapret2 (make
+  #   systemd) cũng để lại 3 unit ở /usr/lib/systemd/system/, và `pacman -Qo`
+  #   trả RỖNG cho chúng — không gói nào sở hữu, chúng là rác. Đo được lúc
+  #   làm trắng máy: xoá /etc xong, `systemctl list-unit-files` vẫn liệt kê đủ
+  #   3 unit này, và ExecStart của chúng trỏ vào
+  #   /opt/zapret2/init.d/sysv/zapret2 — thứ đã bị xoá. Gỡ xong mà còn unit thì
+  #   systemd vẫn cố chạy tầng 1 rồi chết, và người dùng tưởng còn cài.
+  for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
+    rm -f "/etc/systemd/system/$u" "/usr/lib/systemd/system/$u"
+  done
+  systemctl daemon-reload
+  n_left=$(systemctl list-unit-files 2>/dev/null | grep -cE "$RE_UNIT_BASE" || true)
+  if [ "$n_left" -gt 0 ]; then
+    warn "còn $n_left unit zapret2 trong systemd mà lệnh này không xoá được"
+    warn "kiểm tay: systemctl list-unit-files | grep zapret2"
   else
-    systemctl disable --now zapret2 >/dev/null 2>&1
-    for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
-      rm -f "/etc/systemd/system/$u"
-    done
-    systemctl daemon-reload
-    ok "zapret2 đã dừng, unit đã gỡ"
+    ok "zapret2 đã dừng, unit đã gỡ khỏi cả /etc và /usr/lib"
+  fi
+    # Xoá bảng nft của tầng 1.
+    #
+    #   Bản đầu không đụng tới. Bảng `inet zapret2` được nạp lúc zapret2 chạy và
+    #   TỰ TỒN TẠI trong kernel sau khi dịch vụ dừng — đo được: sau
+    #   `--uninstall`, `nft list tables` vẫn còn `table inet zapret2` cùng set
+    #   `zapret` 522288 phần tử. Gỡ xong mà còn bảng thì máy vẫn còn dấu vết
+    #   của tầng 1, và lần cài sau gặp lại bảng cũ.
+    if nft list table inet zapret2 >/dev/null 2>&1; then
+      nft delete table inet zapret2 2>/dev/null \
+        || warn "không xoá được bảng nft inet zapret2 — kiểm tay: nft list tables | grep zapret2"
+    fi
+
   fi
 
   step "GỞ · 20 dòng rule ufw (16 đặc tả)"
@@ -159,7 +193,7 @@ uninstall() {
       ok "đã xoá $n_del/16 đặc tả rule"
     else
       warn "chỉ xoá được $n_del/16 đặc tả rule"
-      warn "kiểm tay: ufw status numbered — còn dòng nào ghi 53, 853 hay 1714:1764 là sót)"
+      warn "kiểm tay: ufw status numbered — còn dòng nào ghi 53, 853 hay 1714:1764 là sót"
     fi
   fi
 
@@ -307,15 +341,36 @@ ufw_has() { # ufw_has <any|ip|v6> <port/proto> <ALLOW|DENY> [IN|OUT]
 # Lặp tối đa 3 lần: một đặc tả "any" tạo RA HAI rule (v4 + v6) và ufw đôi khi
 # chỉ xoá một; lặp lại cho tới khi báo "non-existent" thì hết.
 ufw_del_port() { # ufw_del_port <ALLOW|DENY> <IN|OUT> <addr> <port> <proto>
-  local act=$1 dir=$2 addr=$3 port=$4 proto=$5 n=0 r
-  while [ "$n" -lt 3 ]; do
+  local act dir addr port proto n=0 r
+  # HẠ CHỮ thông điệp và hướng trước khi gọi ufw.
+  #
+  #   `ufw` PHÂN BIỆT HOA/THƯỜNG — đo được:
+  #       $ ufw delete ALLOW OUT to 45.90.28.0 port 53 proto udp
+  #       ERROR: Invalid syntax
+  #       $ ufw delete allow out to 45.90.28.0 port 53 proto udp
+  #       Rule deleted
+  #
+  #   Bản đầu truyền thẳng `$act`/`$dir` xuống ufw, mà nơi gọi truyền chữ HOA
+  #   (ALLOW/DENY, IN/OUT) — nên KHÔNG lần nào xoá được. uninstall im lặng để
+  #   lại toàn bộ 20 rule, chỉ in một dòng cảnh báo. Hạ chữ ở đây thì nơi gọi
+  #   viết HOA hay thường đều chạy, không còn phụ thuộc.
+  act=${1,,}; dir=${2,,}; addr=$3; port=$4; proto=${5,,}
+  # Xoá tới khi hết, không giới hạn 3 lần: lệnh "deny out to any" sinh RA HAI
+  # rule (v4 + v6) nên phải gọi hai lần mới sạch, và 3 là số tùy ý.
+  while [ "$n" -lt 8 ]; do
+    # Cú pháp phải KHỚP ĐÚNG lệnh đã thêm rule, không tự bịa:
+    #   rule DNS (OUT) : ufw allow out to <ip>  port 53  proto udp
+    #   rule KDE (IN)  : ufw allow in  from <src> to any port 1714:1764 proto tcp
+    # Đảo vị trí from/to là "ERROR: Invalid syntax" và ufw không xoá gì cả.
     if [ "$addr" = "any" ]; then
       r=$(ufw delete "$act" out to any port "$port" proto "$proto" 2>&1)
+    elif [ "$dir" = in ]; then
+      r=$(ufw delete "$act" in from "$addr" to any port "$port" proto "$proto" 2>&1)
     else
-      r=$(ufw delete "$act" "$dir" from "$addr" to any port "$port" proto "$proto" 2>&1)
+      r=$(ufw delete "$act" out to "$addr" port "$port" proto "$proto" 2>&1)
     fi
     case "$r" in
-      *"non-existent"*|*"Skipping"*|*"ERROR"*) break ;;
+      *"non-existent"*|*"Skipping"*|*"Invalid syntax"*|*"ERROR"*) break ;;
     esac
     n=$((n + 1))
   done
@@ -539,7 +594,7 @@ need_pkgs() {
 [ "$ACTION" = uninstall ] && uninstall
 
 # =============================================================================
-step "1/9 · KIỂM TRA MÁY"
+step "1/8 · KIỂM TRA MÁY"
 if [ "$ACTION" = install ]; then
   # Đủ 3 tầng + 3 lớp phòng thủ. Bỏ gói nào thì tầng đó hỏng, nên cài hết một
   # lượt thay vì mỗi tầng tự cài — người dùng chỉ phải đồng ý một lần.
@@ -558,7 +613,7 @@ if [ "$ACTION" = install ]; then
 fi
 
 # =============================================================================
-step "2/9 · SAO LƯU VÀO $BACKUP"
+step "2/8 · SAO LƯU VÀO $BACKUP"
 # KHÔNG nuốt lỗi: bản đầu có `2>/dev/null` và mất im lặng 41 tệp, trong đó mất
 # cả opt/zapret2/config — đúng thứ cần để quay lại.
 if [ "$DRY" = 1 ]; then
@@ -613,8 +668,27 @@ else
   [ "$n_bkbad" -eq 0 ] || die "sao lưu chưa đủ — KHÔNG tiếp tục, vì uninstall sẽ mất tệp không sao lưu"
   ok "sao lưu $n_bk tệp cấu hình"
   if [ -d "$ZAPRET_DIR" ]; then
-    cp -a "$ZAPRET_DIR/config" "$st/opt/zapret2/" || die "sao lưu config zapret2 thất bại"
-    cp -a "$ZAPRET_DIR/ipset"  "$st/opt/zapret2/" || die "sao lưu ipset zapret2 thất bại"
+    # Chỉ sao lưu thứ ĐANG CÓ, không giả định.
+    #
+    #   Bản đầu thấy /opt/zapret2 tồn tại là `cp -a $ZAPRET_DIR/config` thẳng.
+    #   Nhưng `git clone` + `make systemd` chỉ tạo ra `config.default`; file
+    #   `config` do chính bước 4 của installer mới sinh ra. Đo được khi cài
+    #   trên máy trắng: clone xong, bước 3 chết (vì lỗi SIGPIPE ở trên), chạy
+    #   lại installer thì bước 2 chết ngay vì /opt/zapret2/config chưa tồn tại
+    #   ⇒ CÀI LẠI KHÔNG ĐƯỢC sau khi hỏng giữa chừng. Đúng thứ khách sạn gặp
+    #   nhất: cài hỏng một lần là phải xoá tay rồi làm lại từ đầu.
+    #
+    #   `tar` bên dưới vẫn nén trọn /opt/zapret2 nên không mất gì.
+    n_z2=0
+    for sub in config ipset; do
+      if [ -e "$ZAPRET_DIR/$sub" ]; then
+        cp -a "$ZAPRET_DIR/$sub" "$st/opt/zapret2/" \
+          || die "sao lưu $sub zapret2 thất bại — dừng"
+        n_z2=$((n_z2 + 1))
+      else
+        say "    /opt/zapret2/$sub chưa có — bỏ qua (chưa tới bước cấu hình)"
+      fi
+    done
     tar -C / -czf "$st/opt-zapret2.tar.gz" opt/zapret2 || die "nén /opt/zapret2 thất bại"
     tar -tzf "$st/opt-zapret2.tar.gz" >/dev/null 2>&1 || die "file nén hỏng — dừng"
   fi
@@ -629,7 +703,7 @@ else
 fi
 
 # =============================================================================
-step "3/9 · TẦNG 1 — zapret2"
+step "3/8 · TẦNG 1 — zapret2"
 if [ -x "$ZAPRET_DIR/nfq2/nfqws2" ]; then
   ok "$ZAPRET_DIR đã có sẵn"
 elif [ "$DRY" = 1 ]; then
@@ -696,10 +770,37 @@ else
   # libraries" — lỗi không nói ra nguyên nhân.
   # Tên biến khác `miss` vì `miss` đã là MẢNG trong need_pkgs; dùng lại ở đây
   # khiến shellcheck báo SC2178 và dễ gây lỗi khi sửa tiếp.
+  # GỌI `ldconfig -p` ĐÚNG MỘT LẦN, rồi so khớp bằng bash thuần.
+  #
+  #   Bản đầu viết `ldconfig -p | grep -qF "$lib"` cho từng thư viện. Đó là
+  #   lỗi CHẶN CÀI ĐẶT trên máy trắng, và chỉ lộ ra ở đây:
+  #
+  #     $ set -o pipefail; ldconfig -p | grep -qF libz.so.1; echo $?
+  #     141
+  #
+  #   `grep -q` thoát ngay khi thấy kết quả đầu tiên ⇒ `ldconfig` đang ghi bị
+  #   SIGPIPE (141) ⇒ `pipefail` lấy 141 ⇒ dấu "||" bắt ⇒ coi thư viện ĐANG CÓ
+  #   là THIẾU rồi `die`. Đo trên máy này: 20/20 lần thất bại, cả 5 thư viện.
+  #   Bỏ `pipefail` thì 0 lần thất bại.
+  #
+  #   Nguyên nhân sâu hơn: bộ đệm pipe chỉ 64 KB. Output của `ldconfig -p` ở đây
+  #   là 3760 dòng (~300 KB) nên vượt đệm → tiến trình ghi bị chặn → grep thoát
+  #   → SIGPIPE. Còn `nm -D` chỉ 212 dòng (~17 KB) thì nằm vừa đệm, chạy
+  #   100/100 lần không lỗi — cùng mẫu lệnh, khác hành vi. Đừng thấy "chỗ này
+  #   chạy được" rồi mặc định chỗ kia cũng vậy.
+  #
+  #   Sửa bằng cách bỏ `grep -q`: lấy danh sách một lần rồi `case` thuần bash.
+  #   Vừa hết pipeline (không còn SIGPIPE), vừa nhanh hơn — bản cũ chạy
+  #   `ldconfig` 5 lần cho 5 thư viện.
+  ld_list=$(ldconfig -p 2>/dev/null || true)
+  [ -n "$ld_list" ] || die "ldconfig không trả về danh sách thư viện nào — không kiểm được tầng 1"
   n_lib=0; ten_lib=""
   for lib in libnetfilter_queue.so.1 libnfnetlink.so.0 libmnl.so.0 \
              libluajit-5.1.so.2 libz.so.1; do
-    ldconfig -p 2>/dev/null | grep -qF "$lib" || { n_lib=$((n_lib+1)); ten_lib="$ten_lib $lib"; }
+    case "$ld_list" in
+      *"$lib"*) : ;;
+      *) n_lib=$((n_lib + 1)); ten_lib="$ten_lib $lib" ;;
+    esac
   done
   if [ "$n_lib" -eq 0 ]; then
     ok "thư viện lúc chạy: đủ 5"
@@ -720,19 +821,70 @@ else
   #
   # Đây cũng là 3 unit mà install_easy.sh cài (service_install_systemd +
   # timer_install_systemd).
-  n_unit=0
-  for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
-    src="$ZAPRET_DIR/init.d/systemd/$u"
-    [ -f "$src" ] || continue
-    install -Dm644 "$src" "/etc/systemd/system/$u" && n_unit=$((n_unit + 1))
-  done
-  [ "$n_unit" -ge 1 ] || die "repo không có file systemd unit — tầng 1 sẽ không khởi động"
-  systemctl daemon-reload
-  ok "$n_unit unit systemd → /etc/systemd/system/"
-fi
+  fi
+
+  # ---- 3 unit systemd: cài ở MỌI nhánh, không chỉ nhánh clone ----
+  #
+  #   Bản đầu đặt khối này TRONG nhánh `else` (nhánh clone). Hệ quả: máy đã có
+  #   /opt/zapret2 thì nhánh "đã có sẵn" chạy, khối bị bỏ qua, và unit KHÔNG
+  #   BAO GIỜ được cài — dù máy trắng hoàn toàn, không có unit nào ở /etc lẫn
+  #   /usr/lib. Đo được: sau khi xoá sạch, chạy installer thì bước 4 chết với
+  #   "Failed to restart zapret2.service: Unit zapret2.service not found".
+  #
+  #   Đây là lỗi thứ BAO cùng loại trong một installer: logic quan trọng bị nhét
+  #   vào nhánh không phải lúc nào cũng chạy. Hai người trước là kiểm thư viện
+  #   và tạo config — đều chỉ lộ ra khi làm trắng máy.
+  #
+  #   Nguồn là `init.d/systemd/` TRONG BẢN CLONE zapret2, không phải repo dotfile
+  #   (repo này không có file .service nào — `git ls-files` xác nhận). Comment
+  #   cũ ghi "file lấy từ chính repo đã ghim" là SAI, đã sửa ở đây.
+  if [ "$DRY" = 1 ]; then
+    say "    [dry] sẽ cài 3 unit systemd từ init.d/systemd/ của bản zapret2"
+  else
+    n_unit=0
+    for u in zapret2.service zapret2-list-update.service zapret2-list-update.timer; do
+      src="$ZAPRET_DIR/init.d/systemd/$u"
+      [ -f "$src" ] || continue
+      install -Dm644 "$src" "/etc/systemd/system/$u" && n_unit=$((n_unit + 1))
+    done
+    # Cả 3 đều phải có, không phải "≥ 1": thiếu timer thì danh sách phân giải
+    # không bao giờ được cập nhật, và sự cố đó lộ ra rất muộn.
+    [ "$n_unit" -eq 3 ] \
+      || die "cài được $n_unit/3 unit systemd từ $ZAPRET_DIR/init.d/systemd/ — tầng 1 không khởi động được"
+    systemctl daemon-reload
+    ok "$n_unit unit systemd → /etc/systemd/system/"
+  fi
+
+
+  # ---- config: tạo từ config.default nếu chưa có ----
+  # Đặt NGOÀI if/elif/else ở trên để mọi nhánh đều qua, kể cả nhánh
+  # "/opt/zapret2 đã có sẵn" — máy đã clone nhưng chưa từng chạy installer thì
+  # vẫn thiếu config.
+  #
+  # Bản đầu không có đoạn này và bước 4 chỉ `die` nếu thiếu. Đo được khi cài
+  # trên máy trắng: `git clone` + `make systemd` chỉ sinh `config.default`,
+  # KHÔNG sinh `config`; bước 4 chết với "không có /opt/zapret2/config".
+  # Nói cách khác: trên máy thật cài được vì config có sẵn từ lần cài tay
+  # trước đó — đoạn này CHƯA TỪNG CHẠY cho tới khi làm trắng máy.
+  #
+  # Cách làm giống hệt zapret2: `cp config.default config`
+  # (install_easy.sh dòng 19, biến ZAPRET_CONFIG_DEFAULT → ZAPRET_CONFIG).
+  if [ "$DRY" = 1 ]; then
+    say "    [dry] sẽ tạo /opt/zapret2/config từ config.default nếu chưa có"
+  elif [ ! -f "$ZAPRET_DIR/config" ]; then
+    [ -f "$ZAPRET_DIR/config.default" ] \
+      || die "không có $ZAPRET_DIR/config.default — bản zapret2 clone về bị thiếu, tầng 1 không dựng được"
+    cp "$ZAPRET_DIR/config.default" "$ZAPRET_DIR/config" \
+      || die "không tạo được $ZAPRET_DIR/config từ config.default"
+    # config là SCRIPT SHELL, không phải keyfile: thiếu dấu = ở là lệnh lạ.
+    bash -n "$ZAPRET_DIR/config" || die "$ZAPRET_DIR/config không phải shell script hợp lệ"
+    ok "đã tạo $ZAPRET_DIR/config từ config.default"
+  else
+    say "    $ZAPRET_DIR/config đã có — giữ nguyên"
+  fi
 
 # =============================================================================
-step "4/9 · CẤU HÌNH zapret2"
+step "4/8 · CẤU HÌNH zapret2"
 # ⚠ /opt/zapret2/config là SCRIPT SHELL, không phải keyfile.
 #   "MODE_FILTER = hostlist" bị bash đọc thành lệnh `MODE_FILTER`
 #   ⇒ "command not found" và zapret2 KHÔNG LÊN. Phải là KEY=VALUE.
@@ -793,7 +945,7 @@ else
 fi
 
 # =============================================================================
-step "5/9 · TẦNG 2 — NextDNS qua DoT"
+step "5/8 · TẦNG 2 — NextDNS qua DoT"
 if [ "$DRY" = 1 ]; then
   run "sẽ ghi resolved.conf" true
   run "sẽ bật ignore-auto-dns" true
@@ -897,9 +1049,29 @@ else
 fi
 
 # =============================================================================
-step "6/9 · TẦNG 2b — TƯỜNG CHẶN DNS"
+step "6/8 · TẦNG 2b — TƯỜNG CHẶN DNS · TẦNG 3 — ufw INPUT deny"
+# BỐN THỨ, ĐÚNG THỨ TỰ: rule TRƯỚC, bật tường SAU, kiểm CUỐI CÙNG.
+#
+#   Trước đây bước 6 thêm rule tường DNS rồi `wall_complete` kiểm, còn bước 7 mới
+#   `systemctl enable --now ufw`. Trên máy đã cài, ufw luôn chạy sẵn nên
+#   `ufw status` in ra bảng rule và mọi kiểm tra đều đúng. Trên MÁY TRẮNG, ufw
+#   chưa từng bật:
+#       $ ufw status          →  Status: inactive     (KHÔNG in bảng rule)
+#       $ ufw allow out to 45.90.28.0 port 53 proto udp
+#                             →  Skipping adding existing rule
+#   Lệnh `ufw allow` ghi vào /etc/ufw/user.rules thật (đủ 8 rule — đã kiểm), nhưng
+#   `ufw_has` đọc `ufw status` nên thấy 0 rule, rồi `die`:
+#       LỖI  tường DNS không đủ 16 rule
+#   Tức là kiểm tra SAI, không phải thiếu rule. Không có lỗi này lộ ra trước đây
+#   vì máy phát triển luôn có ufw chạy.
+#
+#   Còn một rủi ro thật trong thứ tự cũ: `ufw --force reset` để
+#   DEFAULT_INPUT_POLICY=DROP, mà bản cũ bật ufw ở bước 7 TRƯỚC khi thêm 4 rule
+#   KDE Connect ⇒ có một khoảnh thời gian mọi kết nối vào đều bị chặn. Nay tạo
+#   hết rule rồi mới bật, nên khoảnh đó không còn.
 if [ "$DRY" = 1 ]; then
-  say "  [dry] sẽ đảm bảo 16 rule: 8 ALLOW + 8 DENY (cả IPv4 lẫn IPv6)"
+  say "  [dry] sẽ đảm bảo 20 rule (16 tường DNS + 4 KDE Connect) rồi bật ufw"
+  say "  [dry] sẽ đặt policy deny incoming"
 else
   for ip in $ND_V4 $ND_V6; do
     ufw_has "$ip" 53/udp  ALLOW OUT || ufw allow out to "$ip" port 53  proto udp comment 'z2d nextdns 53'  >/dev/null
@@ -912,34 +1084,50 @@ else
       ufw deny out to any port "${pp%/*}" proto "${pp#*/}" comment "z2d chan DNS $pp" >/dev/null
     fi
   done
-  # Đếm KHÔNG đủ — phải kiểm từng rule.
-  wall_complete || die "tường DNS không đủ 16 rule — KHÔNG in HOÀN TẤT"
-  ok "tường DNS đủ 16/16 rule (kiểm từng rule, cả hai họ)"
-fi
-
-# =============================================================================
-step "7/9 · TẦNG 3 — ufw INPUT deny"
-if [ "$DRY" = 1 ]; then
-  say "  [dry] sẽ tạo 4 rule KDE Connect rồi đặt policy deny incoming"
-else
-  systemctl enable --now ufw >/dev/null 2>&1
-  [ "$(systemctl is-active ufw)" = active ] || die "ufw không chạy — tầng 2b+3 không có"
-  # Rule TRƯỚC, policy SAU: đảo thứ tự sẽ tự cắt chính người đang dùng máy.
+  # 4 rule KDE Connect đặt trước khi bật tường, để khoảnh thời gian ufw
+  # active mà chưa có gì cho vào là bằng không.
   for src in 192.168.0.0/16 fe80::/10; do
     for pr in tcp udp; do
       ufw_has "$src" "1714:1764/$pr" ALLOW IN \
         || ufw allow in from "$src" to any port 1714:1764 proto "$pr" comment 'z2d KDE Connect' >/dev/null
     done
   done
-  kde_complete || die "rule KDE Connect không đủ 4 — KHÔNG in HOÀN TẤT"
+
+  # Bật tường. Tới đây `ufw status` mới in bảng rule, tức là các phép kiểm
+  # dưới đây mới kiểm được thứ thật thay vì kiểm trên bảng rỗng.
+  # Bật tường bằng `ufw enable`, KHÔNG bằng `systemctl enable --now ufw`.
+  #
+  #   Hai cái này KHÔNG giống nhau, và đo được rõ:
+  #       $ systemctl enable --now ufw ; systemctl is-active ufw   →  active
+  #       $ ufw status                                           →  inactive
+  #   Vì `ufw --force disable` đặt cờ `ENABLED=no` trong /etc/ufw/ufw.conf, còn
+  #   `systemctl start ufw` chỉ chạy unit nạp iptables — KHÔNG bật lại cờ đó.
+  #   Hậu quả: mọi kiểm tra rule đọc `ufw status` đều thấy bảng rỗng, nên
+  #   `wall_complete` và `kde_complete` FAIL dù rule đã ghi đúng vào
+  #   /etc/ufw/user.rules. Máy cài mới (hoặc máy vừa `ufw disable`) là đúng
+  #   trường hợp này — và máy phát triển của tôi luôn có ufw bật sẵn nên không
+  #   lộ.
+  #
+  #   `--force` vì script chạy không tương tác: `ufw enable` khi có phiên SSH
+  #   đang mở sẽ HỎI "Command may disrupt existing ssh connections" rồi chờ,
+  #   script treo vô hạn. Ở đây không có SSH nên cứ --force, và cảnh báo
+  #   ngay sau đó để người dùng biết mình vừa bật tường thật.
+  ufw --force enable >/dev/null 2>&1 \
+    || die "ufw enable thất bại — tầng 2b+3 không có"
+  say "    đã bật tường: mọi kết nối vào bị chặn trừ 4 rule KDE Connect"
+
+  # Đếm KHÔNG đủ — phải kiểm từng rule, cả hai họ.
+  wall_complete || die "tường DNS không đủ 16 rule — KHÔNG in HOÀN TẤT"
+  kde_complete  || die "rule KDE Connect không đủ 4 — KHÔNG in HOÀN TẤT"
+  ok "tường DNS đủ 16/16 rule + 4 rule KDE Connect (kiểm từng rule, cả hai họ)"
+
   ufw default deny incoming >/dev/null || die "đặt policy deny incoming thất bại"
   pol=$(ufw status verbose 2>/dev/null | sed -n 's/^Default: \([a-z]*\) (incoming).*/\1/p')
   [ "$pol" = deny ] || die "policy đọc lại là '${pol:-?}', không phải deny"
-  ok "4 rule KDE Connect + policy deny incoming"
+  ok "policy deny incoming"
 fi
-
 # =============================================================================
-step "8/9 · SYSCTL + 3 lớp phòng thủ"
+step "7/8 · SYSCTL + 3 lớp phòng thủ"
 if [ "$DRY" = 1 ]; then
   say "  [dry] sẽ nạp khoá, trỏ IPT_SYSCTL, cài drop-in + hook + symlink boot"
 else
@@ -980,12 +1168,12 @@ else
 fi
 
 # =============================================================================
-step "9/9 · KIỂM CHỨNG CUỐI"
+step "8/8 · KIỂM CHỨNG CUỐI"
 # --dry DỪNG Ở ĐÂY, nhưng KHÔNG thoát: còn phải chạy tới khối in kết quả
 # cuối file để in "XEM XONG" và gợi ý câu lệnh chạy thật.
 # Bản đầu viết `return 0 2>/dev/null || exit 0` — ở top-level `return` là lệnh
 # không hợp lệ (nên phải chặn lỗi), và `exit 0` chạy được ⇒ --dry im lặng kết
-# thúc ở dòng "9/9", không có dòng nào báo đã xem xong. Nhánh `if [ "$DRY" = 1 ]`
+# thúc ở dòng "8/8", không có dòng nào báo đã xem xong. Nhánh `if [ "$DRY" = 1 ]`
 # ở cuối file trở thành code chết. Đo: --dry in "XEM XONG" 0 lần.
 nbad=0
 # BẪY ĐÃ DÍNH Ở chính chỗ này: (a) `grep -c ... || echo 0` in "0" RỒI trả 1
@@ -1021,9 +1209,13 @@ chk() {
 }
 # Số mục SUY RA TỪ CHÍNH KHỐI NÀY, không viết cứng. Bản đầu ghi "14 mục", thêm
 # một mục thành 15 mà quên sửa — cùng kiểu lỗi với "10 khoá" ở bước 4.
-#   Khối chạy từ `step "9/9` đến hết file; mọi `chk` trong đó đều chạy đúng
+#   Khối chạy từ bước KIỂM CHỨNG CUỐI đến hết file; mọi `chk` trong đó đều chạy
+#   đúng
 #   một lần (route-metric đã được rút về một lệnh chk ở trên).
-n_chk=$(awk '/^step "9\/[0-9]/{f=1} f' "$SELF" | grep -c '^ *chk ')
+#   KHỚP THEO NỘI DUNG bước ("KIỂM CHỨNG CUỐI"), không theo số thứ tự. Bản đầu
+#   dùng `/^step "9\/[0-9]/` — vỡ ngay khi số bước đổi (gộp 2 bước làm
+#   9/9 → 8/8), và hậu quả là n_chk ra 0 chứ không báo lỗi.
+n_chk=$(awk '/^step ".*KIỂM CHỨNG CUỐI/{f=1} f' "$SELF" | grep -c '^ *chk ')
 if [ "$DRY" = 1 ]; then
   say "    [dry] $n_chk mục kiểm chứng cuối — chạy thật mới kiểm"
 else

@@ -127,7 +127,7 @@ Xem trước đã, không sửa gì:
 sudo bash install.sh --nd-id 785fad --dry
 ```
 
-Đọc hết 9 bước, thấy `XEM XONG` rồi hãy chạy thật:
+Đọc hết các bước, thấy `XEM XONG` rồi hãy chạy thật:
 
 ```bash
 sudo bash install.sh --nd-id 785fad
@@ -157,14 +157,11 @@ Dòng cuối in ra `đạt N · LỆCH M` — N là số mục, M là số mục
 không ghi N cứng trong tài liệu vì số mục thay đổi theo máy; cứ ghi thì sẽ
 lệch, y như lần trước.
 
-> **Một giới hạn cần biết:** toàn bộ phép thử cho tới nay chạy trên máy **đã
-> có sẵn** zapret2, NextDNS, ufw — tức là installer được chạy lại, chưa từng
-> chạy lần đầu trên máy trắng. Riêng bước build (`make systemd` → `sd_notify`)
-> đã kiểm gián tiếp và ra đúng binary đang chạy, nhưng phần `pacman` tự cài
-> gói, copy unit systemd, dựng 3 lớp sysctl trên máy sạch thì **chưa** có
-> bằng chứng. Nếu bạn chạy lần đầu và gặp lỗi, đó là chỗ chưa kiểm — xem
-> [mục 8.2 của NETWORK-DESIGN.md](docs/NETWORK-DESIGN.md) để biết cụ thể
-> chưa có bằng chứng ở đâu.
+> **Đã kiểm trên máy trắng.** Toàn bộ hệ thống từng được gỡ sạch khỏi máy
+> thật (zapret2, NextDNS, ufw, sysctl, cấu hình NetworkManager) rồi cài lại từ
+> đầu theo đúng các bước dưới đây. Lần đó phải sửa **8 lỗi thật** trong
+> `install.sh` mới cài được — tất cả đều là loại "chạy trơn trên máy đã có
+> sẵn, chết ngay trên máy trắng". Xem [mục 8.2 của NETWORK-DESIGN.md](docs/NETWORK-DESIGN.md).
 
 ### Nên làm thêm: API key để kiểm ID
 

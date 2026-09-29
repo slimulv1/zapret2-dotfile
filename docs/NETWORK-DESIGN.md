@@ -193,36 +193,35 @@ Nguyên nhân **chưa xác định**. Hệ quả: khẳng định "bypass mọi 
 mới chỉ được kiểm chứng cho **IPv4**. Nếu nhà mạng lọc SNI trên đường IPv6,
 cấu hình hiện tại có thể không chống được.
 
-### 8.2 Chưa chạy installer trên máy trắng thật
+### 8.2 ĐÃ kiểm trên máy trắng — và 8 lỗi chỉ lộ ra ở đó
 
-Đây là **giới hạn lớn nhất** của toàn bộ những gì đã kiểm. Mọi phép thử cho tới
-nay đều chạy trên máy đã có sẵn zapret2, NextDNS, ufw — tức là installer chỉ
-được chạy lại, không được chạy lần đầu.
+Trước đây mục này ghi "chưa có bằng chứng". Nay **đã chạy thật**: xoá sạch
+zapret2, NextDNS, ufw, sysctl, cấu hình NM, rồi cài từ đầu theo README.
 
-Cụ thể là chưa có bằng chứng cho chuỗi:
+Kết quả: **cài thành công**, nhưng phải sửa **8 lỗi thật** trước đó mới được.
+Tất cả đều là loại "logic đúng, nhưng đặt sai chỗ" — chạy trơn trên máy đã
+có sẵn, chết ngay trên máy trắng:
 
-```
-git clone (tag v1.0.5.2)  →  make systemd  →  sd_notify  →  tầng 1 chạy
-```
+| # | lỗi | triệu chứng trên máy trắng |
+|---|---|---|
+| 1 | `ldconfig -p \| grep -q` + `pipefail` | `die` vì "thiếu thư viện" dù cả 5 đều có |
+| 2 | backup giả định `/opt/zapret2/config` tồn tại | hỏng một lần là **không cài lại được** |
+| 3 | không tạo `config` từ `config.default` | bước 4 chết "không có config" |
+| 4 | copy unit nằm trong nhánh clone | `Unit zapret2.service not found` |
+| 5 | kiểm rule trước khi bật ufw | "tường DNS không đủ 16 rule" dù đủ |
+| 6 | `systemctl enable --now ufw` ≠ `ufw enable` | cờ `ENABLED=no` ⇒ `ufw status` rỗng |
+| 7 | `ufw delete ALLOW OUT from …` sai cú pháp | uninstall **xoá được 0/16 rule** |
+| 8 | uninstall bỏ sót unit ở `/usr/lib` và bảng `nft` | gỡ xong còn dấu vết tầng 1 |
 
-trên một máy **trắng thật**. Riêng bước `make systemd` đã được kiểm gián tiếp
-(bằng cách build ở thư mục tạm: tag `v1.0.5.2` → `6b6c63e`, `nfq2/` có 29 `.c`
-· 0 `.go`, `make systemd` exit 0, ra binary 288768 byte có `sd_notify`, **trùng
-khích thước** với binary đang chạy trên máy). Nhưng còn lại:
+Nguyên nhân chung đáng ghi nhất: **mọi phép thử trước đó chạy trên máy đã có
+đủ mọi thứ**, nên nhánh "chưa có" của installer không bao giờ được chạy. Sửa
+cách kiểm chứng, không chỉ sửa code: `test/t1-config.sh` chỉ đọc trạng thái
+đã cài, nó không phát hiện được installer có chạy đúng trên máy trắng hay không.
 
-- `need_pkgs` tự gọi `pacman -S` cho 8 gói + 5 thư viện trên máy thiếu gói;
-- 3 tệp unit systemd được copy từ repo;
-- `IPT_SYSCTL`, drop-in `ufw.service.d`, hook pacman — lần đầu tiên trên máy
-  sạch, không phải ghi đè lên bản đã có.
-
-Đã thử tạo máy ảo QEMU để chạy thật, nhưng **không làm được**: ISO CachyOS
-desktop cần GRUB với bàn phím, còn `-kernel` trực tiếp thì live ISO không đọc
-`archiso_device` từ kernel cmdline (đo được: `Mounting '' to /run/archiso/bootmnt`
-rồi rơi vào prompt dù đã truyền `archiso_device=/dev/sr0` lẫn
-`archiso_device=LABEL=COS_202608`). Dừng lại thay vì đoán.
-
-Muốn kiểm chứng: làm đúng ba lệnh ở mục *Cài từ máy trắng* trong README, trên
-máy Arch/CachyOS thật.
+Còn chưa có bằng chứng: `need_pkgs` tự `pacman -S` — không gỡ được `gcc`,
+`make`, `git`, `nftables`, `ufw`, `luajit` vì `paru`, `mpv`, `gamescope`,
+`dnsmasq`, `dkms` phụ thuộc vào chúng (pacman từ chối cả lệnh). Muốn kiểm thì
+phải trên máy thật sự trống.
 
 ### 8.3 `ufw --force reload` từ CLI không đi qua systemd
 
@@ -261,6 +260,17 @@ thời điểm đó.
 | `pkill -f 'qemu-system…'` | `-f` khớp **cả dòng lệnh shell đang chạy** vì dòng đó chứa đúng chuỗi cần tìm ⇒ tự giết chính mình, mất output | tách PID ra tệp, `kill "$PID"` |
 | `pkill -f` + `sudo` trong cùng lệnh | `sudo` chờ mật khẩu, PAM khoá tài khoản sau 3 lần sai | dùng `SUDO_ASKPASS`; xoá helper **sau** khi xong, đừng xoá giữa chừng |
 | đếm dòng có mã màu ANSI | `grep -cE '^ +(OK\|LỆCH)'` ra 0 vì dòng bắt đầu bằng mã màu, không phải khoảng trắng | `sed 's/\x1b\[[0-9;]*m//g'` rồi mới đếm |
+| `producer \| grep -q` + `set -o pipefail` | `grep -q` thoát sớm ⇒ producer nhận **SIGPIPE (141)** ⇒ pipefail trả 141 ⇒ coi thứ **đang có** là **thiếu**. Đo: `ldconfig -p \| grep -q` hỏng **20/20 lần** vì output 3760 dòng (~300 KB) vượt đệm pipe 64 KB; `nm -D` 212 dòng thì **0/100 lần** vì nằm vừa đệm | bỏ `grep -q`: lấy output một lần rồi so khớp bằng `case` của bash. Cùng mẫu lệnh, khác hành vi — đừng suy từ chỗ chạy được |
+| `systemctl enable --now ufw` | **KHÔNG** bật cờ `ENABLED=yes` trong `/etc/ufw/ufw.conf`, nên `ufw status` vẫn in `Status: inactive` và **không in bảng rule**, dù `is-active` là `active` | dùng `ufw --force enable` (`--force` vì `ufw enable` sẽ hỏi xác nhận rồi chờ, script không tương tác thì treo) |
+| kiểm trạng thái trước khi bật dịch vụ | đọc `ufw status` khi ufw chưa bật ⇒ bảng rỗng ⇒ mọi kiểm tra rule FAIL dù rule đã ghi đúng vào `user.rules` | tạo hết rule **rồi mới** bật tường, kiểm sau cùng |
+| `ufw delete ALLOW OUT from <ip> to any port …` | sai cú pháp ⇒ `ERROR: Invalid syntax`, ufw **không xoá gì** mà vẫn trả 0. uninstall âm thầm để lại toàn bộ 20 rule | cú pháp phải **khớp đúng** lệnh đã thêm: `delete allow out to <ip> port …` và `delete allow in from <src> to any port …` |
+| `ufw` phân biệt HOA/thường | `ufw delete ALLOW OUT …` → Invalid syntax; `ufw delete allow out …` → Rule deleted | hạ chữ ngay trong hàm: `act=${1,,}; dir=${2,,}` — nơi gọi viết kiểu nào cũng chạy |
+| logic đặt trong nhánh không phải lúc nào cũng vào | copy unit và kiểm thư viện nằm trong nhánh `else` (nhánh clone) ⇒ máy đã có `/opt/zapret2` thì **không bao giờ** chạy | đặt việc cần luôn xảy ra **ngoài** if/elif/else; chỉ phần *clone* mới nằm trong nhánh |
+| gọi `cp` cho tệp có thể chưa tồn tại | backup chết vì `/opt/zapret2/config` chưa sinh (chỉ `config.default` mới có) ⇒ hỏng một lần là không cài lại được, phải xoá tay | chỉ sao lưu thứ **đang có**, in ra thứ bỏ qua |
+| gỡ không đụng tới thứ build sinh ra | `make systemd` để lại 3 unit ở `/usr/lib/systemd/system/`; `pacman -Qo` trả rỗng (không gói nào sở hữu) | gỡ ở **cả** `/etc` và `/usr/lib`, rồi đếm còn sót và cảnh báo |
+| `systemctl list-unit-files` mẫu regex hẹp | mẫu `^zapret2(-list-update)?\.` **không khớp** `zapret2-bc2.service` nên cảnh báo im lặng đúng lúc còn sót | `^zapret2.*\.`; và luôn thử bằng unit thật, đừng chỉ tin regex |
+| bảng `nft` tự tồn tại sau khi dừng dịch vụ | `nft list tables` vẫn còn `table inet zapret2` + set 522288 phần tử sau `--uninstall` | `nft delete table inet zapret2` trong `uninstall()` |
+| khối đặt ngoài chốt `--dry` | khối xoá bảng nft tôi viết nằm **sau** `fi` của `if [ "$D" = 1 ]` ⇒ `--uninstall --dry` sẽ xoá thật | `--dry` phải được kiểm bằng cách so trạng thái trước/sau, không tin lời in |
 | phép thử rỗng | `dig @<IPv6 Cloudflare>` timeout **dù đã mở tường** ⇒ luôn báo "đã chặn", báo đạt giả | đổi sang TCP 853 qua IPv6, đo được là phân biệt được |
 
 **Nguyên tắc rút ra:** một phép đo chỉ đáng tin khi nó phân biệt được *"đúng"* với
@@ -274,7 +284,7 @@ nó có bắt không. Chạy một lần thấy "đạt" là bằng không.
 Đo ngày 2026-09-28, sau khi chạy `install.sh`:
 
 ```
-install.sh              9/9 bước · 14/14 mục kiểm cuối · exit 0
+install.sh              đủ bước · 15/15 mục kiểm cuối · exit 0
 install.sh --dry        vân tay trước/sau GIỐNG NHAU · 0 lần in "HOÀN TẤT"
 install.sh lần 2        0 rule sửa thêm ⇒ idempotent
 t1-config.sh            37/37 đạt · exit 0
