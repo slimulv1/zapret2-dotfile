@@ -3,17 +3,16 @@
 Ba tầng lọc cho CachyOS / Arch. **NextDNS** quyết định trang nào bị chặn,
 **zapret2** chống chuyện bị chặn nhầm, **ufw** đóng cửa những thứ lọt vào máy.
 
-Có một cách hình dung cả hệ thống trong một câu: mọi câu hỏi tên miền đều được
-dồn về đúng một chỗ, rồi để chỗ đó quyết định. Phần nào nằm trong máy thì script
-lo hết. Riêng danh sách chặn thì nằm trên đám mây NextDNS — phần đó bạn phải tự
-bật.
+Cả hệ thống chỉ xoay quanh một ý: gom mọi câu hỏi tên miền về đúng một chỗ, rồi
+để chỗ đó quyết định. Phần nào nằm trong máy thì script lo hết. Riêng danh sách
+chặn thì nằm trên đám mây NextDNS — phần đó bạn phải tự bật.
 
 ## Vấn đề
 
-Ở Việt Nam, phần lớn trang bị chặn đều bị chặn **theo tên miền**, chứ không phải
-theo địa chỉ IP. Bạn vẫn vào được IP đó từ máy bất kỳ, chỉ cần gõ đúng địa chỉ —
-không có quy tắc nào ở tầng đường truyền chặn được. Nói cách khác, chỗ duy nhất
-quyết định cho đi hay chặn là chỗ hỏi tên miền.
+Ở Việt Nam, người ta chặn theo **tên miền**, không theo địa chỉ IP. Bạn vẫn vào
+được IP đó từ máy bất kỳ, chỉ cần gõ đúng địa chỉ — không có quy tắc nào ở tầng
+đường truyền chặn được. Nói cách khác, chỗ duy nhất quyết định cho đi hay chặn
+chính là chỗ hỏi tên miền.
 
 ```
 ┌─────────────────────────────────── MÁY CỦA BẠN ────────────────────────────────────┐
@@ -21,22 +20,22 @@ quyết định cho đi hay chặn là chỗ hỏi tên miền.
 │  KHI BẠN MỞ MỘT TRANG WEB                                                          │
 │                                                                                    │
 │  [1]  TẦNG 2 · NextDNS qua DoT                                                     │
-│      Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn tuỳ                │
-│      danh sách nằm trên đám mây của bạn.                                           │
+│      Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn                    │
+│      tuỳ danh sách nằm trên đám mây của bạn.                                       │
 │                                                                                    │
 │      << ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                       │
 │      Danh sách chặn nằm trên đám mây chứ không nằm trong máy,                      │
 │      nên phần cài đặt bên dưới chỉ kiểm được, không bật được.                      │
 │                                                                                    │
 │  [2]  TẦNG 1 · zapret2 · desync                                                    │
-│      Mở kết nối tới IP vừa nhận được. Cắt gói đầu của kết nối                      │
-│      HTTPS thành hai đoạn, đoạn đầu chỉ mang 1 byte. Bộ lọc của                    │
-│      nhà mạng cần nguyên gói đó để đọc tên miền, nên không khớp                    │
-│      mẫu nào và cho qua.                                                           │
+│      Mở kết nối tới IP vừa nhận được, rồi cắt gói mở đầu                           │
+│      thành hai đoạn, đoạn đầu chỉ mang 1 byte. Bộ lọc của                          │
+│      nhà mạng cần nguyên gói đó để đọc tên miền, nên không                         │
+│      khớp mẫu nào và cho qua.                                                      │
 │                                                                                    │
 │      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                     │
-│      miền bị chặn ở bước [1] thì không có kết nối nào để mà sửa                    │
-│      ở bước [2].                                                                   │
+│      miền bị chặn ở bước [1] thì bước [2] không còn kết nối                        │
+│      nào để mà sửa.                                                                │
 │                                                                                    │
 │  KHI CÓ AI GỌI TỚI MÁY BẠN                                                         │
 │                                                                                    │
@@ -44,21 +43,21 @@ quyết định cho đi hay chặn là chỗ hỏi tên miền.
 │      Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.                      │
 │                                                                                    │
 │  [4]  TẦNG 2b · ufw · tường chặn DNS                                               │
-│      Chỉ cho phép hỏi NextDNS ở 53/udp và 853/tcp, chặn mọi nơi                    │
-│      hỏi DNS khác — cả IPv4 lẫn IPv6.                                              │
+│      Chỉ cho phép hỏi NextDNS ở 53/udp và 853/tcp, chặn mọi                        │
+│      nơi hỏi DNS khác — cả IPv4 lẫn IPv6.                                          │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Một điều dễ hiểu nhầm
 
 **Tầng 1 không phải là thứ cứu truy cập.** Nó sửa gói tin, chứ không tạo ra gói
-tin. Tên miền đã bị chặn ở bước [1] thì ở bước [2] không còn kết nối nào để mà
-sửa cả. Hãy hiểu nó là lưới an toàn, không phải chốt chặn cuối.
+tin. Tên miền đã bị chặn ở bước [1] thì ở bước [2] chẳng còn kết nối nào để mà
+sửa. Hãy hiểu nó là lưới an toàn, không phải chốt chặn.
 
-Chặn ở đây thuộc kiểu **DNS**, không phải kiểu DPI — và điều đó tôi đo được, không
-suy ra. Tắt hẳn zapret2 đi thì `github`, `wikipedia`, `example` vẫn trả `200` trọn
-vẹn: đường truyền của tôi không có bộ lọc nào cả. Nghĩa là thứ thật sự chặn trang
-chính là câu trả lời của NextDNS ở bước [1].
+Chặn ở đây thuộc kiểu **DNS**, không phải kiểu DPI — và điều đó tôi đo được chứ
+không suy ra. Tắt hẳn zapret2 đi, `github`, `wikipedia`, `example` vẫn trả `200`
+trọn vẹn: đường truyền của tôi không có bộ lọc nào cả. Nói cách khác, thứ thật
+sự chặn trang chính là câu trả lời của NextDNS ở bước [1].
 
 ## Đã đo được gì
 
@@ -75,15 +74,15 @@ Mỗi tầng đều có phép đo, không phải lời hứa:
 Cách đo, những bẫy đo phải tránh, và chỗ nào **còn chưa** chứng minh được — tất cả ở
 [docs/NETWORK-DESIGN.md](docs/NETWORK-DESIGN.md).
 
-> Hai lab trong bảng trên dựng bằng `tests/lab/`, chạy tự động bằng pytest. Máy
-> này không có `tcpdump` cũng không có `nmap`, mà cài hai thứ đó vào đúng máy đang
-> kiểm rồi không dám xoá thì phiền hơn là tự làm.
+> Hai lab trong bảng trên nằm ở `tests/lab/`, chạy tự động dưới pytest. Máy này
+> không có `tcpdump` cũng không có `nmap` — cài hai thứ đó vào chính máy đang kiểm
+> rồi cũng không dám xoá, nên tôi tự viết.
 
 ## Cài đặt
 
 ### Bước 1 — Tạo profile NextDNS
 
-Làm trước khi cài gì cả, vì bạn cần lấy ID ở đây.
+Làm trước tiên, vì ID phải lấy ở đây.
 
 1. Vào <https://my.nextdns.io>, đăng ký nếu chưa có, tạo một profile.
 2. Bật hai công tắc **Threat Intelligence Feeds** và **AI Threat Detection**.
@@ -138,7 +137,7 @@ Dòng cuối in ra `đạt N · LỆCH M` — N là số mục, M là số mục
 
 > **Đã thử trên máy trắng.** Hệ thống 3 tầng từng được gỡ sạch khỏi máy thật rồi
 > cài lại từ đầu. Lần đó phải sửa **8 lỗi thật** trong `install.sh` mới cài được —
-> toàn những lỗi loại "chạy trơn trên máy đã có sẵn, chết ngay trên máy trắng".
+> toàn làm loại "chạy trơn trên máy đã có sẵn, chết ngay trên máy trắng".
 >
 > "Máy trắng" ở đây là **không còn hệ thống 3 tầng**, không phải máy trống không
 > gói gì. Các gói nền (`gcc` `make` `git` `nftables` `ufw` `luajit`) để nguyên —
@@ -159,18 +158,20 @@ Trước khi in `HOÀN TẤT`, installer tự kiểm — và các phép kiểm �
 
 ## Hai việc còn lại, phải tự làm
 
-Cả hai nằm ngoài máy. `install.sh` đọc được cái thứ nhất nhưng không bật được,
-vì API key chỉ có quyền đọc.
+Cả hai nằm ngoài máy. `install.sh` đọc được cái thứ nhất chứ không bật được, vì
+API key chỉ có quyền đọc.
 
-**Bật cấu hình tầng 2 trên đám mây.** Script in ra tên profile, số mục chặn /
-cho qua, và cảnh báo nếu `aiThreatDetection` hoặc `threatIntelligenceFeeds` đang
-tắt. Bật thì bạn phải tự làm ở <https://my.nextdns.io>.
+**Bật cấu hình tầng 2 trên đám mây.** Script in ra tên profile, số mục chặn và cho
+qua, và cảnh báo nếu `aiThreatDetection` hoặc `threatIntelligenceFeeds` đang tắt.
+Bật thì bạn phải tự vào <https://my.nextdns.io>.
 
-Ranh giới của việc kiểm: `install.sh` bắt được đúng hai công tắc đó, vì đó là
-thứ nó đọc được. `test/t1-config.sh` thì chỉ kiểm **hình dạng** cấu hình, không
-kiểm hành vi — ID sai, danh sách rỗng, hay NextDNS đổi ý bạn thì nó vẫn báo đạt.
+Ranh giới của việc kiểm nên nói rõ. `install.sh` bắt được đúng hai công tắc đó,
+vì đó là thứ nó đọc được. Còn `test/t1-config.sh` thì chỉ kiểm **hình dạng** cấu
+hình, không kiểm hành vi — ID sai, danh sách rỗng, hay NextDNS đổi ý bạn thì nó
+vẫn báo đạt.
+
 Muốn biết chắc tầng 2 có thật sự lọc không, hỏi một tên miền mà bạn biết chắc
-profile của bạn đang chặn:
+profile của mình đang chặn:
 
 ```bash
 dig +short <tên miền đó>     # 0.0.0.0 là đúng · IP thật là đang hỏng
@@ -197,14 +198,14 @@ sysctl siết cứng.
 
 ## Đường mặc định: cáp trước, wifi chỉ dự phòng
 
-`install.sh` tự làm phần này, bạn không cần gõ gì. Nhưng nên hiểu vì sao, phòng
-khi sau này bạn tự đỉnh.
+`install.sh` tự làm phần này, bạn không cần gõ gì. Nhưng nên hiểu vì sao, để sau
+này tự chỉnh không bỡ ngỡ.
 
 Khi cáp và wifi cùng mở, Linux chọn đường bằng **metric** — đường nào có số nhỏ
 hơn thì thắng. Installer đặt cáp `100`, wifi `50000`.
 
-Con số bạn đặt chưa phải số thật. Wifi trên máy này là hotspot điện thoại, mà
-NetworkManager liên tục thử xem mỗi kết nối có ra được Internet thật không:
+Nhưng con số bạn đặt chưa phải số thật. Wifi trên máy này là hotspot điện thoại,
+mà NetworkManager liên tục thử xem mỗi kết nối có ra được Internet thật không:
 
 ```
 cáp   enp8s0   full      ra được Internet bình thường
@@ -220,9 +221,9 @@ Cái hay nhầm nhất là phần cộng 20000 đó. Nó **không** đến từ
 không nhúc nhích. Nó đến từ kết quả kiểm tra kết nối, và chỉ biến mất khi
 NetworkManager xếp wifi lên `full`.
 
-Cáp hỏng thì route của cáp biến mất, wifi thành đường mặc định — không cần làm
-gì thêm. Đó cũng là lúc metric `50000` thành vô nghĩa, nhưng vẫn thắng vì chỉ còn
-một đường.
+Cáp hỏng thì route của cáp biến mất, wifi thành đường mặc định, không cần làm
+gì thêm. Lúc đó metric `50000` cũng chẳng còn ý nghĩa — dù sao thì chỉ còn một
+đường.
 
 Muốn tự chỉnh:
 
@@ -248,11 +249,12 @@ Hai số `100` và `50000` không có ý nghĩa gì đặc biệt, chỉ cần c
 `45.90.28.0#<ID>.dns.nextdns.io`.
 
 API key chỉ để **đọc**: nó giúp script hỏi NextDNS xem ID bạn đưa có thật không, và
-đọc xem profile đang có bao nhiêu mục chặn / cho qua. Không có key thì hệ thống vẫn
-chạy y hệt, chỉ mất phần kiểm — và script nói thẳng là không kiểm được chứ không
-im lặng coi như đã kiểm. Lý do phải nói thẳng: ID sai không gây lỗi gì cả,
-NextDNS chỉ trả lời bằng profile mặc định của họ, nên máy vẫn thông mạng mà
-không lọc gì.
+đếm xem profile đang có bao nhiêu mục chặn, bao nhiêu cho qua.
+
+Không có key thì hệ thống vẫn chạy y hệt, chỉ mất phần kiểm — và script nói thẳng
+là không kiểm được, chứ không im lặng coi như đã kiểm. Nói vậy là vì ID sai không
+gây lỗi gì cả: NextDNS chỉ trả lời bằng profile mặc định của họ, nên máy vẫn thông
+mạng mà không lọc gì.
 
 Đặt key ở `/root/.config/nextdns/api.key`, quyền 600, lấy ở
 <https://my.nextdns.io> → Account → API:
@@ -286,8 +288,9 @@ SUDO_ASKPASS=/tmp/.zz.sh sudo -A /tmp/z2d-qa/venv/bin/python -m pytest tests/ -q
 … -q --nd-id <ID> --run-destructive
 ```
 
-Hai lab dùng netns — một máy quét từ "bên ngoài", một DPI giả chặn theo tên miền —
-đều tự dựng và tự dọn trong `finally`. Cách dùng chi tiết: [`tests/README.md`](tests/README.md).
+Trong đó có hai lab dùng netns: một máy quét từ "bên ngoài", một DPI giả chặn
+theo tên miền. Cả hai tự dựng và tự dọn trong `finally`. Cách dùng chi tiết ở
+[`tests/README.md`](tests/README.md).
 
 ## Đọc thêm
 
