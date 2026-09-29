@@ -193,12 +193,43 @@ Nguyên nhân **chưa xác định**. Hệ quả: khẳng định "bypass mọi 
 mới chỉ được kiểm chứng cho **IPv4**. Nếu nhà mạng lọc SNI trên đường IPv6,
 cấu hình hiện tại có thể không chống được.
 
-### 8.2 `ufw --force reload` từ CLI không đi qua systemd
+### 8.2 Chưa chạy installer trên máy trắng thật
+
+Đây là **giới hạn lớn nhất** của toàn bộ những gì đã kiểm. Mọi phép thử cho tới
+nay đều chạy trên máy đã có sẵn zapret2, NextDNS, ufw — tức là installer chỉ
+được chạy lại, không được chạy lần đầu.
+
+Cụ thể là chưa có bằng chứng cho chuỗi:
+
+```
+git clone (tag v1.0.5.2)  →  make systemd  →  sd_notify  →  tầng 1 chạy
+```
+
+trên một máy **trắng thật**. Riêng bước `make systemd` đã được kiểm gián tiếp
+(bằng cách build ở thư mục tạm: tag `v1.0.5.2` → `6b6c63e`, `nfq2/` có 29 `.c`
+· 0 `.go`, `make systemd` exit 0, ra binary 288768 byte có `sd_notify`, **trùng
+khích thước** với binary đang chạy trên máy). Nhưng còn lại:
+
+- `need_pkgs` tự gọi `pacman -S` cho 8 gói + 5 thư viện trên máy thiếu gói;
+- 3 tệp unit systemd được copy từ repo;
+- `IPT_SYSCTL`, drop-in `ufw.service.d`, hook pacman — lần đầu tiên trên máy
+  sạch, không phải ghi đè lên bản đã có.
+
+Đã thử tạo máy ảo QEMU để chạy thật, nhưng **không làm được**: ISO CachyOS
+desktop cần GRUB với bàn phím, còn `-kernel` trực tiếp thì live ISO không đọc
+`archiso_device` từ kernel cmdline (đo được: `Mounting '' to /run/archiso/bootmnt`
+rồi rơi vào prompt dù đã truyền `archiso_device=/dev/sr0` lẫn
+`archiso_device=LABEL=COS_202608`). Dừng lại thay vì đoán.
+
+Muốn kiểm chứng: làm đúng ba lệnh ở mục *Cài từ máy trắng* trong README, trên
+máy Arch/CachyOS thật.
+
+### 8.3 `ufw --force reload` từ CLI không đi qua systemd
 
 Lớp 2 (drop-in) không bắn. Lớp 1 (`IPT_SYSCTL`) có phủ. Sau lệnh đó nên chạy
 tay `sudo sysctl --system`.
 
-### 8.3 Nội dung 17 blocklist không kiểm được
+### 8.4 Nội dung 17 blocklist không kiểm được
 
 NextDNS không công bố nội dung danh sách. `profile-privacy.json` chỉ cho biết
 tên và số mục. Muốn biết vì sao một trang bị chặn thì phải hỏi NextDNS tại
@@ -225,6 +256,11 @@ thời điểm đó.
 | `KEY = VALUE` cho zapret2 | config là **script shell** ⇒ `MODE_FILTER: command not found`, zapret2 không lên | `KEY=VALUE` + `bash -n` trước khi restart |
 | `sed` trên khối nhiều dòng | `NFQWS2_OPT` nhiều dòng, sed chỉ thay dòng đầu ⇒ các dòng sau trôi thành lệnh lạ | một lượt `awk` xoá cả khối rồi chèn |
 | `cp ... 2>/dev/null` trong backup | nuốt lỗi im lặng ⇒ bản sao lưu thiếu `opt/zapret2/config`, mất đúng thứ cần để quay lại | không che lỗi + xác nhận tệp bắt buộc tồn tại |
+| `printf '%-32s'` của bash | luôn đệm theo **BYTE**, kể cả khi `LC_CTYPE` là UTF-8. Nhãn tiếng Việt có dấu ⇒ 1 ký tự 2 byte ⇒ cột hụt tới 3 ký tự, ngay ở bản gốc | `local LC_ALL=C.UTF-8` trong hàm, để `${#1}` đếm KÝ TỰ rồi tự tính khoảng trắng |
+| `${#x}` dưới `sudo` | `sudo` xoá biến `LC_*` ⇒ `${#x}` đếm **byte** trong khi lúc đo tay bằng tay tính **ký tự** ⇒ chốt "≤ 32 ký tự" báo sai 31 thành 33 | đo cả hai cách trước khi tin; chỗ nào cần thì `export LC_ALL` cục bộ |
+| `pkill -f 'qemu-system…'` | `-f` khớp **cả dòng lệnh shell đang chạy** vì dòng đó chứa đúng chuỗi cần tìm ⇒ tự giết chính mình, mất output | tách PID ra tệp, `kill "$PID"` |
+| `pkill -f` + `sudo` trong cùng lệnh | `sudo` chờ mật khẩu, PAM khoá tài khoản sau 3 lần sai | dùng `SUDO_ASKPASS`; xoá helper **sau** khi xong, đừng xoá giữa chừng |
+| đếm dòng có mã màu ANSI | `grep -cE '^ +(OK\|LỆCH)'` ra 0 vì dòng bắt đầu bằng mã màu, không phải khoảng trắng | `sed 's/\x1b\[[0-9;]*m//g'` rồi mới đếm |
 | phép thử rỗng | `dig @<IPv6 Cloudflare>` timeout **dù đã mở tường** ⇒ luôn báo "đã chặn", báo đạt giả | đổi sang TCP 853 qua IPv6, đo được là phân biệt được |
 
 **Nguyên tắc rút ra:** một phép đo chỉ đáng tin khi nó phân biệt được *"đúng"* với

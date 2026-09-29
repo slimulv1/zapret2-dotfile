@@ -157,6 +157,15 @@ Dòng cuối in ra `đạt N · LỆCH M` — N là số mục, M là số mục
 không ghi N cứng trong tài liệu vì số mục thay đổi theo máy; cứ ghi thì sẽ
 lệch, y như lần trước.
 
+> **Một giới hạn cần biết:** toàn bộ phép thử cho tới nay chạy trên máy **đã
+> có sẵn** zapret2, NextDNS, ufw — tức là installer được chạy lại, chưa từng
+> chạy lần đầu trên máy trắng. Riêng bước build (`make systemd` → `sd_notify`)
+> đã kiểm gián tiếp và ra đúng binary đang chạy, nhưng phần `pacman` tự cài
+> gói, copy unit systemd, dựng 3 lớp sysctl trên máy sạch thì **chưa** có
+> bằng chứng. Nếu bạn chạy lần đầu và gặp lỗi, đó là chỗ chưa kiểm — xem
+> [mục 8.2 của NETWORK-DESIGN.md](docs/NETWORK-DESIGN.md) để biết cụ thể
+> chưa có bằng chứng ở đâu.
+
 ### Nên làm thêm: API key để kiểm ID
 
 Không có key thì hệ thống vẫn chạy, chỉ không biết ID bạn đưa có đúng không. Xem
