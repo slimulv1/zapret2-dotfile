@@ -225,7 +225,7 @@ else
   if [ "$D" = 1 ]; then
     say "    [dry] khôi phục hoặc xoá 7 tệp theo $BACKUP, xoá /opt/zapret2"
   else
-    n_ok=0 n_rm=0 n_fail=0
+    n_ok=0 n_rm=0 n_fail=0 n_keep=0
     for rel in etc/systemd/resolved.conf \
                etc/sysctl.d/60-z2d-hardening.conf \
                etc/ufw/sysctl.conf \
@@ -242,9 +242,24 @@ else
         rm -f "/$rel" 2>/dev/null
         if cp -a "$BACKUP/$rel" "/$rel" 2>/dev/null; then n_ok=$((n_ok+1)); else n_fail=$((n_fail+1)); fi
       else
+        # KHÔNG có trong backup.
+        #
+        #   CHỈ xoá tệp do hệ 3 tầng TẠO RA. Tệp thuộc GÓI phải để nguyên.
+        #   Đo được: chạy `--uninstall` trên máy chưa từng cài, không có backup
+        #   ⇒ nó in "0 tệp khôi phục · 7 tệp xoá" và xoá luôn
+        #     /etc/default/ufw      (thuộc gói ufw)
+        #     /etc/ufw/sysctl.conf  (thuộc gói ufw)
+        #     /etc/nftables.conf    (thuộc gói nftables)
+        #   Tức uninstall trên máy KHÔNG CÀI gì vẫn phá 3 tệp của gói. Mất
+        #   dữ liệu thật, không phải lỗi hiển thị.
+        #
+        #   Cách phân biệt: `pacman -Qo` trả tên gói ⇒ tệp của gói, để yên.
+        #   Rỗng ⇒ không gói nào sở hữu ⇒ tệp do ta tạo, xoá được.
         if [ ! -e "/$rel" ]; then
-          n_rm=$((n_rm+1))                       # đã vắng sẵn, không cần xoá
-        elif rm -f "/$rel" 2>/dev/null; then n_rm=$((n_rm+1)); else n_fail=$((n_fail+1)); fi
+          n_rm=$((n_rm + 1))                       # đã vắng sẵn, không cần xoá
+        elif _own=$(pacman -Qo "/$rel" 2>/dev/null); then
+          n_keep=$((n_keep + 1))                  # thuộc gói — GIỮ NGUYÊN
+        elif rm -f "/$rel" 2>/dev/null; then n_rm=$((n_rm + 1)); else n_fail=$((n_fail + 1)); fi
       fi
     done
     if [ -d "$BACKUP/etc/systemd/system/ufw.service.d" ]; then
@@ -272,9 +287,9 @@ else
     # Phải phân nhánh theo n_fail. Bản đầu in "OK …" vô điều kiện, nên khi tệp
     # không xử lý được thì vẫn đọc là đã xong.
     if [ "$n_fail" -eq 0 ]; then
-      ok "$n_ok tệp khôi phục · $n_rm tệp xoá (trước đó chưa có)"
+      ok "$n_ok tệp khôi phục · $n_rm tệp xoá · $n_keep tệp của gói (giữ nguyên)"
     else
-      warn "$n_ok khôi phục · $n_rm xoá · $n_fail KHÔNG xử lý được"
+      warn "$n_ok khôi phục · $n_rm xoá · $n_keep giữ nguyên · $n_fail KHÔNG xử lý được"
       warn "xem lại: ls -l /etc/systemd/resolved.conf /etc/ufw/ /etc/default/ufw"
     fi
   fi
@@ -719,6 +734,24 @@ else
   #   bi kịch, nên không được bỏ chặt kiểm tra này.
   st_gc() { case "${st:-}" in /var/backups/.z2d.*) rm -rf -- "$st" ;; esac; }
   trap st_gc EXIT
+
+  # BẮT TÍN HIỆU. `trap ... EXIT` một mình là chưa đủ.
+  #
+  #   Đo bằng pty thật (đúng cách Ctrl-C gửi ):
+  #     bản cũ — chỉ có `trap … EXIT`:
+  #         in "BUOC-A" → Ctrl-C → DỪNG, không in gì thêm → exit 0
+  #     bản mới — có `trap … INT TERM`:
+  #         in "BUOC-A" → Ctrl-C → in "DỪNG do tín hiệu" → exit 130
+  #
+  #   Tức script CÓ dừng (và EXIT trap có dọn thư mục tạm — đo được 0 mục rác).
+  #   Lỗi thật là **im lặng và trả 0**: người dùng bấm Ctrl-C lúc `make` đang
+  #   chạy ở bước 3, thấy exit 0 thì tưởng cài xong, trong khi thực tế máy có
+  #   thể đang ở giữa chừng và không ai canh giữ nữa.
+  #
+  #   Ghi lại cả nhầm lẫn của tôi: lần đầu tôi gửi tín hiệu bằng
+  #   `kill -INT -- -$PID` cho nhóm của tiến trình `setsid`, quan sát thấy script
+  #   vẫn in các dòng sau, và kết luận "không dừng". Cách gửi đó không giống
+  trap on_sig INT TERM
   mkdir -p "$st/etc/systemd/system/ufw.service.d" "$st/etc/sysctl.d" \
            "$st/etc/ufw" "$st/etc/default" "$st/etc/pacman.d/hooks" "$st/opt/zapret2"
   # BẢN ĐẦU NUỐT LỖI Ở ĐÂY, VÀ ĐÂY CHÍNH LÀ CHỖ NGUY HIỂM NHẤT.
