@@ -229,6 +229,21 @@ else
     fi
     # Những thứ do ta TẠO RA, không bao giờ có trong backup.
     rm -f /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
+    rm -f /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
+    # Xoá thư mục drop-in NẾU RỖNG — và chỉ khi rỗng.
+    #
+    #   Bản đầu chỉ xoá file, để lại /etc/systemd/system/ufw.service.d/ rỗng.
+    #   Đo được: sau --uninstall, thư mục này vẫn còn. Systemd thì bỏ qua nên
+    #   vô hại, nhưng đó là tàn dư do ta tạo ra, cùng loại với unit rác ở
+    #   /usr/lib mà đã sửa.
+    #
+    #   CHỈ xoá khi rỗng: nếu trước khi cài, người dùng đã có drop-in riêng
+    #   trong đó thì khối trên đã khôi phục lại chúng — xoá thư mục lúc đó sẽ
+    #   xoá luôn việc của họ.
+    z2d_dir=/etc/systemd/system/ufw.service.d
+    if [ -d "$z2d_dir" ] && [ -z "$(ls -A "$z2d_dir" 2>/dev/null)" ]; then
+      rmdir "$z2d_dir" 2>/dev/null || warn "không xoá được thư mục rỗng $z2d_dir"
+    fi
     rm -f /usr/local/bin/z2d-sysctl-apply
     rm -rf "$ZAPRET_DIR" 2>/dev/null
     # Phải phân nhánh theo n_fail. Bản đầu in "OK …" vô điều kiện, nên khi tệp
@@ -819,8 +834,22 @@ else
   # trong /usr/lib nếu có. File lấy từ chính repo đã ghim, không tự viết tay —
   # ExecStart trỏ vào init.d/sysv/zapret2, tức nơi binary vừa dựng xong.
   #
-  # Đây cũng là 3 unit mà install_easy.sh cài (service_install_systemd +
-  # timer_install_systemd).
+#
+# SAI Ở MỘT CHỖ, CỐ Ý GIỮ NGUYÊN: đây là 3 unit mà install_easy.sh cài
+# (service_install_systemd + timer_install_systemd), nhưng ta CHỈ enable
+# `zapret2.service`, KHÔNG enable `zapret2-list-update.timer`. Upstream thì
+# enable cả hai (install_easy.sh:559).
+#
+#   Đo được: `GETLIST=` trong config RỖNG, nên get_config.sh (ExecStart của
+#   list-update.service) không có gì để tải — chạy tay thì chỉ in
+#   "reloading nftables set backend (forced-update)" rồi thoát 0, config
+#   không đổi (đã diff), zapret2 vẫn chạy. Tức bật timer cũng vô hại, nhưng
+#   cũng vô dụng: cứ 2 ngày lúc 00:00 chạy một việc không có việc gì.
+#
+#   Nên comment cũ "Đây cũng là 3 unit mà install_easy.sh cài" đọc ra như thể
+#   ta bám sát upstream cả về hành vi, và không đúng. Giữ file unit cho khớp
+#   bộ của upstream (và để ai đó tự enable được), nhưng nói thẳng ra là không
+#   bật, và vì sao.
   fi
 
   # ---- 3 unit systemd: cài ở MỌI nhánh, không chỉ nhánh clone ----

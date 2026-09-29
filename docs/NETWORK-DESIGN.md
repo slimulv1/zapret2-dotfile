@@ -218,6 +218,27 @@ Nguyên nhân chung đáng ghi nhất: **mọi phép thử trước đó chạy 
 cách kiểm chứng, không chỉ sửa code: `test/t1-config.sh` chỉ đọc trạng thái
 đã cài, nó không phát hiện được installer có chạy đúng trên máy trắng hay không.
 
+**Lần thứ hai (sau khi đã sửa 8 lỗi): cài thành công ngay lần đầu, không lộ
+thêm lỗi nào.** Vì máy lần trước đã có `/opt/zapret2` do lần chết giữa chừng,
+nên nhánh `clone` chưa từng chạy trọn với bản đã sửa. Lần này chạy đủ 4 nhánh
+một lần: clone + `make systemd` → thư viện đủ 5 → 3 unit → tạo `config`.
+
+Hai chỗ sai lệch so với upstream phát hiện được khi soi sâu (không phải lỗi
+chặn cài, nhưng là chỗ nói dối):
+
+- **Timer không được bật.** `install_easy.sh:559` enable
+  `zapret2-list-update.timer`; ta chỉ enable `zapret2.service`. Đo được
+  `GETLIST=` rỗng nên `get_config.sh` không có gì tải — chạy tay thì chỉ in
+  "reloading nftables set backend (forced-update)", thoát 0, `config` không đổi
+  (đã diff). Nên bật cũng vô hại, cũng vô dụng. Comment cũ của ta viết "Đây cũng
+  là 3 unit mà install_easy.sh cài" đọc ra như thể bám sát cả hành vi. Đã sửa
+  comment nói thẳng là không bật và vì sao.
+- **Thư mục `ufw.service.d/` rỗng còn lại sau `--uninstall`.** Systemd bỏ qua
+  nên vô hại, nhưng là tàn dư do ta tạo — cùng loại với unit rác ở `/usr/lib`
+  đã sửa. Nay xoá, **nhưng chỉ khi thư mục rỗng**: nếu người dùng có drop-in
+  riêng thì khối khôi phục đã đặt lại chúng, xoá thư mục là xoá việc của họ.
+  Thử cả hai ca: rỗng → xoá; có file của người dùng → giữ nguyên nội dung.
+
 `need_pkgs` (tự `pacman -S` khi thiếu gói) là phần **chưa** được chạy thật —
 nhưng đây **không phải** khiếm khuyết của installer. Lý do: `gcc`, `make`,
 `git`, `nftables`, `ufw`, `luajit` là **gói nền** của máy, và máy bình thường
@@ -277,6 +298,8 @@ thời điểm đó.
 | `systemctl list-unit-files` mẫu regex hẹp | mẫu `^zapret2(-list-update)?\.` **không khớp** `zapret2-bc2.service` nên cảnh báo im lặng đúng lúc còn sót | `^zapret2.*\.`; và luôn thử bằng unit thật, đừng chỉ tin regex |
 | bảng `nft` tự tồn tại sau khi dừng dịch vụ | `nft list tables` vẫn còn `table inet zapret2` + set 522288 phần tử sau `--uninstall` | `nft delete table inet zapret2` trong `uninstall()` |
 | khối đặt ngoài chốt `--dry` | khối xoá bảng nft tôi viết nằm **sau** `fi` của `if [ "$D" = 1 ]` ⇒ `--uninstall --dry` sẽ xoá thật | `--dry` phải được kiểm bằng cách so trạng thái trước/sau, không tin lời in |
+| bộ đo của tôi tự báo sai ba lần | (a) `awk '/^300 /'` không khớp vì dòng procfs **có thụt lề đầu dòng** ⇒ tầng 1 bị báo là không nhận gói; (b) `diff <(sudo cat A) <(sudo cat B)` cho kết quả bịa vì `sudo` trong process substitution; (c) `awk '/^done$/'` không khớp `  done` ⇒ trích ra **file rỗng** rồi kết luận "fix hỏng 60/60" | đo lại bằng `$1==300`; so sánh bằng file trên đĩa; kiểm tra file trích có dòng trước khi tin. **Nguyên tắc: phép đo hỏng thì báo "không đo được", không báo số** |
+| bỏ qua nội dung của systemd | `install.sh` copy 3 unit giống upstream nhưng chỉ enable 1, comment lại viết như bám sát cả hành vi | đọc `install_easy.sh` đối chiếu từng dòng `enable`; nếu cố ý khác thì nói thẳng và nêu lý do |
 | gỡ gói nền để "làm trắng máy" | `gcc`, `make`, `git`, `nftables`, `ufw`, `luajit` là **gói nền**; gỡ chúng làm hỏng `paru`, `mpv`, `gamescope`, `dnsmasq`, `dkms` (pacman từ chối cả lệnh). Tệ hơn: nó **không kiểm được** gì | "trắng" = không còn hệ thống 3 tầng, **không** phải không có gói build. Muốn thử `need_pkgs` thì dùng container, đừng gỡ gói nền trên máy thật |
 | phép thử rỗng | `dig @<IPv6 Cloudflare>` timeout **dù đã mở tường** ⇒ luôn báo "đã chặn", báo đạt giả | đổi sang TCP 853 qua IPv6, đo được là phân biệt được |
 
