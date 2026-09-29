@@ -54,9 +54,8 @@ chính là chỗ hỏi tên miền.
 tin. Tên miền đã bị chặn ở bước [1] thì ở bước [2] chẳng còn kết nối nào để mà
 sửa. Hãy hiểu nó là lưới an toàn, không phải chốt chặn.
 
-Chặn ở đây thuộc kiểu **DNS**, không phải kiểu DPI — và điều đó tôi đo được chứ
-không suy ra. Tắt hẳn zapret2 đi, `github`, `wikipedia`, `example` vẫn trả `200`
-trọn vẹn: đường truyền của tôi không có bộ lọc nào cả. Nói cách khác, thứ thật
+Chặn ở đây thuộc kiểu **DNS**, không phải kiểu DPI. Tắt hẳn zapret2 đi, `github`, `wikipedia`, `example` vẫn trả `200`
+trọn vẹn: đường truyền không có bộ lọc nào cả. Nói cách khác, thứ thật
 sự chặn trang chính là câu trả lời của NextDNS ở bước [1].
 
 ## Đã đo được gì
