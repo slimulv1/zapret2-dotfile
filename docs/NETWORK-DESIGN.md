@@ -294,6 +294,26 @@ nhưng đây **không phải** khiếm khuyết của installer. Lý do: `gcc`, 
 tường ufw, sysctl, cấu hình NM), không phải **không có gói build**. Xem bảng
 trên: 8 lỗi tìm ra đều thuộc loại thứ hai, và tìm ra hết từ cấu hình.
 
+### 8.2c Rà `uninstall()` lần ba: 3 chỗ để lại dấu vết
+
+`uninstall()` đã sửa 2 vòng trước (unit rác ở `/usr/lib`, bảng `nft`). Rà kỹ
+thêm thì còn 3 chỗ, đều là "gỡ xong nhưng máy chưa về đúng trạng thái cũ":
+
+1. **`/etc/resolv.conf` không được sao lưu.** Bước 5 `rm -f` rồi tạo symlink trỏ
+   stub, nhưng danh sách sao lưu không có mục này. Nếu tệp gốc là TỆP THẬT
+   (máy dùng resolvconf, hoặc admin tự viết) thì mất luôn, không phục hồi được.
+   Nay thêm vào danh sách.
+2. **`cp` khi khôi phục đi theo symlink.** `/etc/resolv.conf` sau khi cài là
+   symlink; `cp -a backup /etc/resolv.conf` sẽ ghi ĐÈ mất
+   `/run/systemd/resolve/stub-resolv.conf` mà symlink vẫn trỏ vào đó. Nay `rm`
+   trước rồi mới `cp`. Đo được: stub còn nguyên 920 byte, mtime không đổi.
+3. **Policy INPUT không được khôi phục.** Bản đầu chỉ `ufw default deny incoming`
+   mà không lưu giá trị cũ ⇒ gỡ xong vẫn còn `deny` dù hệ thống đã bị gỡ hết.
+   `ufw status verbose` trong backup chỉ để người đọc, code không dùng lại. Nay
+   ghi `ufw-policy-in.txt` lúc sao lưu và đặt lại lúc gỡ. Vòng kiểm chứng:
+   `allow → cài → deny → gỡ → allow`.
+4. **`rm -f` bị lặp hai lần** trên cùng một tệp drop-in — sót từ lần sửa trước.
+
 ### 8.3 `ufw --force reload` từ CLI không đi qua systemd
 
 Lớp 2 (drop-in) không bắn. Lớp 1 (`IPT_SYSCTL`) có phủ. Sau lệnh đó nên chạy
@@ -344,6 +364,9 @@ thời điểm đó.
 | khối đặt ngoài chốt `--dry` | khối xoá bảng nft tôi viết nằm **sau** `fi` của `if [ "$D" = 1 ]` ⇒ `--uninstall --dry` sẽ xoá thật | `--dry` phải được kiểm bằng cách so trạng thái trước/sau, không tin lời in |
 | bộ đo của tôi tự báo sai ba lần | (a) `awk '/^300 /'` không khớp vì dòng procfs **có thụt lề đầu dòng** ⇒ tầng 1 bị báo là không nhận gói; (b) `diff <(sudo cat A) <(sudo cat B)` cho kết quả bịa vì `sudo` trong process substitution; (c) `awk '/^done$/'` không khớp `  done` ⇒ trích ra **file rỗng** rồi kết luận "fix hỏng 60/60" | đo lại bằng `$1==300`; so sánh bằng file trên đĩa; kiểm tra file trích có dòng trước khi tin. **Nguyên tắc: phép đo hỏng thì báo "không đo được", không báo số** |
 | bỏ qua nội dung của systemd | `install.sh` copy 3 unit giống upstream nhưng chỉ enable 1, comment lại viết như bám sát cả hành vi | đọc `install_easy.sh` đối chiếu từng dòng `enable`; nếu cố ý khác thì nói thẳng và nêu lý do |
+| `cp` khôi phục mà quên `rm` trước | `/etc/resolv.conf` sau khi cài là symlink trỏ stub; `cp -a backup /etc/resolv.conf` đi theo symlink và **ghi đè mất stub** — tệp bị hỏng lúc nào không biết | `rm -f` đích trước, rồi mới `cp -a` |
+| gỡ xong mà không trả lại policy | chỉ set `ufw default deny incoming` mà không lưu giá trị cũ ⇒ sau uninstall vẫn `deny`, dù hệ thống đã bị gỏ hết; người dùng quy nhầm cho ufw | ghi policy vào backup lúc cài, đặt lại lúc gỡ; thiếu thì báo, không đoán |
+| sửa tệp mà quên sao lưu nó | `/etc/resolv.conf` bị `rm -f` + tạo symlink mà không nằm trong danh sách sao lưu ⇒ mất luôn nếu bản gốc là tệp thật | thay đổi gì thì phải có đường quay lại |
 | mẫu `grep` sai thứ tự trong một dòng | `ss` in `… 45.90.28.0:853 users:(("systemd-resolve",…))` — địa chỉ **trước** tên tiến trình, nên `grep 'systemd-resolve.*:853'` không bao giờ khớp và cảnh báo báo đạt giả | tách hai lần `grep` trên cùng dòng: `\| grep systemd-resolve \| grep -q ':853'` |
 | đặt số mong đợi mà không đo trước | `chk "policy INPUT" … "1/1"` viết từ trí nhớ; chạy thật ra `2/2` vì đếm không tách được họ IPv4/IPv6 | đếm theo bảng (`table ip` / `table ip6`) trước khi viết kỳ vọng |
 | `--dry` không kiểm tệp cấu hình | xoá `config/z2d-exclude.txt`, `--dry` vẫn in `XEM XONG` exit 0 — công cụ xem trước không bắt được lỗi nó sinh ra để bắt | kiểm đủ 9 tệp ở bước 1; `--dry` phải **chặt** chứ không chỉ báo |

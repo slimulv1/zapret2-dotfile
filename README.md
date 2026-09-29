@@ -49,8 +49,9 @@ Phần nào nằm trong máy thì script lo hết. Riêng danh sách chặn thì
 │  LUÔN LUÔN BẬT, MỌI LÚC MỞ MÁY                                                     │
 │                                                                                    │
 │  [4]  TẦNG 2b · ufw · tường chặn DNS                                               │
-│      Chỉ cho phép hỏi NextDNS ở cổng 53 và 853, chặn mọi nơi hỏi                   │
-│      DNS khác — cả IPv4 lẫn IPv6.                                                  │
+│      Chỉ cho phép hỏi NextDNS ở **53/udp** và **853/tcp**, chặn mọi nơi hỏi        │
+│      DNS khác — cả IPv4 lẫn IPv6. (53/tcp cũng bị chặn, đo được:                  │
+│      `dig +tcp @45.90.28.0` không ra kết quả.)                                      │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -235,6 +235,11 @@ else
                etc/pacman.d/hooks/z2d-pacman-ufw.hook; do
       if [ -e "$BACKUP/$rel" ]; then
         mkdir -p "/$(dirname "$rel")"
+        # `rm` TƯỚC khi `cp` — nếu không, và /$rel đang là symlink (điển hình
+        # /etc/resolv.conf trỏ stub), `cp` sẽ đi theo symlink và GHI ĐÈ mất
+        # tệp đích, còn symlink vẫn trỏ vào đó. Đo được: sau uninstall, phải
+        # có `rm` mới giữ được /run/systemd/resolve/stub-resolv.conf nguyên vẹn.
+        rm -f "/$rel" 2>/dev/null
         if cp -a "$BACKUP/$rel" "/$rel" 2>/dev/null; then n_ok=$((n_ok+1)); else n_fail=$((n_fail+1)); fi
       else
         if [ ! -e "/$rel" ]; then
@@ -294,6 +299,19 @@ else
       warn "không có /run/systemd/resolve/stub-resolv.conf — DNSStubListener đang tắt?"
     fi
     systemctl restart ufw >/dev/null 2>&1
+    # Khôi phục policy INPUT nếu backup có lưu. Không có thì KHÔNG đoán — báo
+    # và bỏ qua, vì đặt bừa còn tệ hơn không đặt.
+    _pol_saved=$(cat "$BACKUP/ufw-policy-in.txt" 2>/dev/null || true)
+    case "$_pol_saved" in
+      allow|deny|reject)
+        if ufw default "$_pol_saved" incoming >/dev/null 2>&1; then
+          ok "policy incoming → $_pol_saved (khôi phục từ backup)"
+        else
+          warn "không đặt lại được policy incoming ($_pol_saved)"
+        fi ;;
+      "") warn "backup không lưu policy INPUT — giữ nguyên policy hiện tại" ;;
+      *)  warn "policy trong backup lạ ($_pol_saved) — giữ nguyên" ;;
+    esac
     if [ "$n_res" = 1 ]; then
       ok "resolv.conf → stub · ufw đã nạp lại"
     else
@@ -710,9 +728,17 @@ else
   #   MẤT luôn không thể quay lại.
   #   Nên: tệp có thật mà cp hỏng thì CHẾT, kèm tên tệp.
   n_bk=0 n_bkbad=0
+  # `/etc/resolv.conf` PHẢI có mặt. Bản đầu không có, mà bước 5 lại `rm -f` rồi
+  # tạo symlink trỏ stub ⇒ khi uninstall, tệp gốc không có chỗ nào để khôi phục.
+  #   Nguy hiểm nhất khi nó vốn là TỆP THẬT chứ không phải symlink: máy dùng
+  #   resolvconf, hoặc admin tự viết. Mất luôn, không phục hồi được.
+  #   `cp -a` giữ nguyên symlink (không chép theo đích) nên phục hồi đúng cả hai.
+  #   Phần khôi phục phải `rm` trước — nếu không, `cp` sẽ đi theo symlink stub
+  #   và ghi đè mất `/run/systemd/resolve/stub-resolv.conf`.
   for f in /etc/systemd/resolved.conf /etc/sysctl.d/60-z2d-hardening.conf \
            /etc/ufw/sysctl.conf /etc/ufw/z2d-sysctl.conf /etc/default/ufw \
-           /etc/nftables.conf /etc/pacman.d/hooks/z2d-pacman-ufw.hook; do
+           /etc/nftables.conf /etc/pacman.d/hooks/z2d-pacman-ufw.hook \
+           /etc/resolv.conf; do
     [ -e "$f" ] || continue                       # chưa có thì không cần lưu
     if cp -a --parents "$f" "$st/" 2>/dev/null; then
       n_bk=$((n_bk + 1))
@@ -763,6 +789,12 @@ else
     tar -tzf "$st/opt-zapret2.tar.gz" >/dev/null 2>&1 || die "file nén hỏng — dừng"
   fi
   ufw status numbered > "$st/ufw-numbered.txt" 2>/dev/null || true
+  # Lưu policy INPUT để khôi phục khi gỡ. `ufw status verbose` bên dưới chỉ
+  # để NGƯỜI ĐỌC, không được code dùng lại. Bản đầu chỉ set `ufw default deny
+  # incoming` mà không lưu giá trị cũ ⇒ uninstall xong vẫn còn deny dù hệ thống
+  # đã bị gỡ hết, và người dùng dễ quy nhầm cho ufw.
+  ufw status verbose 2>/dev/null | sed -n 's/^Default: \([a-z]*\) (incoming).*/\1/p' \
+    > "$st/ufw-policy-in.txt" 2>/dev/null || true
   nft list ruleset   > "$st/nft-ruleset.txt"   2>/dev/null || true
   { echo "Sao lưu chuẩn — $(date -Is)"
     echo "Phục hồi: sudo bash install.sh --uninstall"; } > "$st/BAO-GHI.txt"
