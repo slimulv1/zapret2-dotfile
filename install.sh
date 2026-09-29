@@ -814,8 +814,14 @@ else
       # "Bị đầu" chỉ có nghĩa với TỆP CỦA GÓI: tệp mà ta tự tạo (tên `z2d-*`)
       # thì có dấu z2d là CHUYỆN BÌNH THƯỜNG, không phải backup hỏng.
       # Lần sửa đầu báo nhầm cho 60-z2d-hardening.conf và z2d-sysctl.conf.
+      # Tìm mọi dấu vết `z2d`, KHÔNG chỉ `z2d-sysctl.conf`.
+      #   Bản đầu lọc đúng chuỗi đó nên KHÔNG bắt được
+      #   `/etc/systemd/resolved.conf`: bản backup chứa nội dung z2d (dòng đầu
+      #   là `#!/usr/bin/env bash` + chú thích `z2d-resolved.conf`), không hề
+      #   có `z2d-sysctl.conf`. Đo được: `pacman -Qkk systemd` vẫn báo
+      #   SHA256 mismatch cho tệp đó sau khi uninstall "khôi phục 7 tệp".
       if pacman -Qo "/$f" >/dev/null 2>&1 \
-         && grep -q 'z2d-sysctl\.conf' "$BACKUP$f" 2>/dev/null; then
+         && grep -q 'z2d' "$BACKUP$f" 2>/dev/null; then
         warn "bản sao lưu của $f ĐÃ BỊ ĐẦU (tệp của gói mà trong đó có dấu z2d)"
         warn "  — bản gốc của gói đã mất. Gỡ sạch thật thì: sudo rm -rf $BACKUP"
         warn "  rồi cài lại từ đầu."
