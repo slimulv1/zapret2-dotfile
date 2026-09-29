@@ -33,9 +33,14 @@ Phần nào nằm trong máy thì script lo hết. Riêng danh sách chặn thì
 │      nhà mạng cần nguyên gói đó để đọc tên miền, nên không khớp                    │
 │      mẫu nào và cho qua.                                                           │
 │                                                                                    │
-│      Đã đo trên máy này: tầng chạy, nhận gói thật, hỗ trợ cả IPv4 lẫn IPv6.      │
-│      Còn phần "đoạn đầu đúng 1 byte" thì CHƯA đo được — cần bắt gói, mà máy       │
-│      không cài tcpdump. Xem [mục 8.1](docs/NETWORK-DESIGN.md).                     │
+│      Đã đo trên máy này: đoạn đầu đúng 1 byte — cả IPv4 lẫn IPv6.                  │
+│      Đo bằng bắt gói thẳng trên dây (AF_PACKET), không cần tcpdump.                │
+│      Phải tắt TSO/GSO trước khi đo, nếu không host chỉ thấy một khối lớn           │
+│      và sẽ ra số sai.                                                              │
+│        zapret2 chạy · đoạn đầu 1 byte (0x16), rồi mới tới phần còn lại             │
+│        zapret2 dừng  · đoạn đầu 1424 byte, nguyên ClientHello một mảng             │
+│      Tổng byte hai nhánh bằng nhau (1907/1920/1925) — chỉ khác cách chia.          │
+│      Chi tiết phép đo và các bẫy đo: [mục 8.1](docs/NETWORK-DESIGN.md).            │
 │                                                                                    │
 │      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                     │
 │      miền bị chặn ở bước [1] thì không có kết nối nào để mà sửa                    │
@@ -50,8 +55,8 @@ Phần nào nằm trong máy thì script lo hết. Riêng danh sách chặn thì
 │                                                                                    │
 │  [4]  TẦNG 2b · ufw · tường chặn DNS                                               │
 │      Chỉ cho phép hỏi NextDNS ở **53/udp** và **853/tcp**, chặn mọi nơi hỏi        │
-│      DNS khác — cả IPv4 lẫn IPv6. (53/tcp cũng bị chặn, đo được:                  │
-│      `dig +tcp @45.90.28.0` không ra kết quả.)                                      │
+│      DNS khác — cả IPv4 lẫn IPv6. (53/tcp cũng bị chặn, đo được:                   │
+│      `dig +tcp @45.90.28.0` không ra kết quả.)                                     │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 

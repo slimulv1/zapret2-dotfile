@@ -227,7 +227,9 @@ So từng phần tử của sơ đồ README với trạng thái thật:
 | [1] hỏi ở cổng 853 | `ss` thấy `systemd-resolve → 45.90.28.0:853` | khớp |
 | [1] chặn / cho qua | 2 domain chặn, 3 domain qua | khớp |
 | [2] desync | queue bật cả `AF_INET` + `AF_INET6`, nhận gói thật | cơ chế đúng |
-| [2] "đoạn đầu 1 byte" | **không đo được** (thiếu tcpdump) | thiếu bằng chứng |
+| [2] "đoạn đầu 1 byte" | **đã đo**: `1 byte` (`0x16`) khi zapret2 chạy, `1424 byte` khi dừng; tổng byte không đổi | khớp |
+| [2] IPv6 cùng phép đo | `curl -6` cũng ra đoạn đầu `1 byte`, 3/3 nhóm | khớp |
+| [1] DNS qua IPv6 | chặn riêng 2 IP v4 ⇒ `resolvectl` vẫn phân giải; `ss` thấy `systemd-resolve → [2a07:a8c0::]:853` | khớp |
 | [3] chặn INPUT | kernel: `hook input … policy drop` cả 2 họ | khớp |
 | [4] tường DNS v4+v6 | 3 server v4 + 2 server v6 đều `timed out` | khớp |
 
@@ -327,7 +329,70 @@ thời điểm đó.
 
 ---
 
+### 8.1b Đo "đoạn đầu 1 byte" — không cần `tcpdump`, và những bẫy của nó
+
+Trước đây mục này ghi *"không đo được, thiếu tcpdump"*. Sai: `tcpdump` chỉ là
+một cách, và cách đó còn **không đáng tin** khi offload còn bật. Đo bằng raw
+socket `AF_PACKET` tự phân tích header, không cài gói nào.
+
+```python
+# /tmp/z2d-qa/sniff.py — lược
+s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0003))
+s.bind(('enp8s0', 0))          # chỉ bắt trên đúng NIC đang định tuyến
+# bóc Ethernet → (VLAN) → IPv4/IPv6 → TCP; gom đoạn đầu tiên mang dữ liệu
+# của mỗi nhóm 4-tuple, sau SYN
+```
+
+**Bẫy 1 — offload làm ra số sai.** `tcp-segmentation-offload: on` ⇒ kernel đưa
+cả khối lớn xuống NIC, NIC mới chia trên dây. `AF_PACKET` trên host nằm *trước*
+bước chia, nên host thấy **một skb lớn** dù trên dây có nhiều đoạn nhỏ. Đo mà
+quên tắt TSO/GSO thì ra số hoàn toàn sai. Phải:
+
+```bash
+ethtool -K enp8s0 tso off gso off gro off   # trước khi đo
+ethtool -K enp8s0 tso on  gso on  gro on    # bắt buộc bật lại sau khi đo
+```
+
+**Bẫy 2 — phải có nhánh đối chứng.** Một con số "1 byte" mà không có nhánh
+"tắt zapret2" thì không chứng minh gì: nếu máy vốn đã chia nhỏ thì cũng ra 1.
+Đo cả hai, và so **tổng số byte** — phải bằng nhau:
+
+| | zapret2 chạy | zapret2 dừng |
+|---|---|---|
+| đoạn đầu | **1 byte** (`head=16` = 0x16, byte đầu ClientHello) | **1424 / 1388 / 1348 byte** (`head=16030106…`) |
+| cách chia | 1 + 1424 + 145 | 1424 + 146 |
+| tổng byte | 1907 / 1920 / 1925 | **1907 / 1920 / 1925** (y hệt) |
+
+Tổng byte bằng nhau mà cách chia khác ⇒ đúng nghĩa desync, không phải mất gói.
+
+**Bẫy 3 — `dig` là công cụ sai cho địa chỉ NextDNS v6.** `dig @[2a07:a8c0::]`
+báo `couldn't get address for '[2a07:a8c0::]': failure` — đây là `getaddrinfo`
+của `dig` không phân tích được literal dạng `::`, **không phải** mạng hỏng.
+Vài cách kiểm lại:
+
+```bash
+dig @2a07:a8c0:0:0:0:0:0:0 …          # viết đủ 8 nhóm — vẫn timeout
+dig +tls -p 853 @45.90.28.0 …         # DoT phải có +tls, không có thì im lặng
+# bằng chứng đúng: chặn RIÊNG 2 IP v4 (bảng nft tạm) → resolvectl vẫn ra kết quả
+ss -tnp | grep 2a07:a8c0              # systemd-resolve → [2a07:a8c0::]:853  ESTAB
+```
+
+Ba domain **chưa từng được cache** đều phân giải được lúc v4 bị chặn ⇒ loại trừ
+giả thuyết "resolved đọc cache". `ss` mới là bằng chứng quyết định.
+
+**Còn chưa đo được:** dừng zapret2 thì `github`/`wikipedia`/`example` vẫn trả
+200 ⇒ **môi trường này không có DPI chặn các site đó**, nên phần *"tắt zapret2
+thì domain bị chặn phải fail"* của INV-DESYNC-1 **không kiểm được ở đây**.
+Muốn kiểm phần đó cần lab có DPI giả lập (nft payload match SNI/Host).
+
 ## 9. Bẫy đo đã dính — ghi lại để không lặp
+| `pacman -Qkk \| grep -c 'modified:'` | Qkk **không** dùng chữ `modified:`, nó ghi `\"... (SHA256 checksum mismatch)\"` ⇒ grep trả **0 giả**, tưởng không tệp nào bị sửa | đếm `grep -c SHA256`, và luôn đối chiếu trực tiếp tệp khi kết luận |
+| `[ -e \"/var/backups/…\" ]` bằng user thường | thư mục `root` 700 ⇒ `[ -e ]` trả **false dù tệp có thật** ⇒ kết luận \"không có trong backup\" | đo bằng `sudo -A test -e` |
+| `dig @[2a07:a8c0::]` | `couldn't get address for '[2a07:a8c0::]': failure` — đây là `getaddrinfo` của dig **không** phân tích được literal dạng `::`, **không phải** mạng hỏng | bằng chứng thật: chặn riêng v4 + `ss` thấy `systemd-resolve → [2a07:a8c0::]:853` |
+| `dig -p 853` không kèm `+tls` | gửi DNS **rõ** qua cổng DoT ⇒ NextDNS im lặng ⇒ tưởng đường v6 chết | `dig +tls -p 853 @…` |
+| đo đoạn khi TSO/GSO còn bật | host thấy **một skb lớn** dù trên dây có nhiều đoạn nhỏ ⇒ số đo sai hoàn toàn | `ethtool -K enp8s0 tso off gso off gro off` trước khi đo, và **bật lại** sau khi đo |
+| đo đoạn đầu mà không có nhánh đối chứng | con số đúng một cách ngẫu nhiên cũng có thể ra 1 byte; không chứng minh được gì | đo cả hai nhánh (bật/dừng) và so **tổng byte** — phải bằng nhau |
+| `grep -cE '…-offload: on'` để xác nhận offload | không khớp `generic-receive-offload` ⇒ báo \"2/3\" trong khi cả 3 đều `on` | liệt kê từng mục bằng `^(tên):` |
 
 Đây là phần đáng giá nhất của tài liệu. Mỗi mục là một lỗi đã xảy ra thật và
 đã tốn công tìm.
