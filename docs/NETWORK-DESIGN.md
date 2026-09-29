@@ -218,10 +218,16 @@ Nguyên nhân chung đáng ghi nhất: **mọi phép thử trước đó chạy 
 cách kiểm chứng, không chỉ sửa code: `test/t1-config.sh` chỉ đọc trạng thái
 đã cài, nó không phát hiện được installer có chạy đúng trên máy trắng hay không.
 
-Còn chưa có bằng chứng: `need_pkgs` tự `pacman -S` — không gỡ được `gcc`,
-`make`, `git`, `nftables`, `ufw`, `luajit` vì `paru`, `mpv`, `gamescope`,
-`dnsmasq`, `dkms` phụ thuộc vào chúng (pacman từ chối cả lệnh). Muốn kiểm thì
-phải trên máy thật sự trống.
+`need_pkgs` (tự `pacman -S` khi thiếu gói) là phần **chưa** được chạy thật —
+nhưng đây **không phải** khiếm khuyết của installer. Lý do: `gcc`, `make`,
+`git`, `nftables`, `ufw`, `luajit` là **gói nền** của máy, và máy bình thường
+đã có chúng. Tôi từng định gỡ để "làm trắng" rồi mới hiểu là sai: gỡ nền tảng
+để chứng minh một hàm tự cài là cách kiểm sai, và nó còn làm hỏng `paru`,
+`mpv`, `gamescope`, `dnsmasq`, `dkms` — những gói phụ thuộc vào chúng.
+
+"Máy trắng" ở đây nghĩa là **không còn hệ thống 3 tầng** (zapret2, NextDNS,
+tường ufw, sysctl, cấu hình NM), không phải **không có gói build**. Xem bảng
+trên: 8 lỗi tìm ra đều thuộc loại thứ hai, và tìm ra hết từ cấu hình.
 
 ### 8.3 `ufw --force reload` từ CLI không đi qua systemd
 
@@ -271,6 +277,7 @@ thời điểm đó.
 | `systemctl list-unit-files` mẫu regex hẹp | mẫu `^zapret2(-list-update)?\.` **không khớp** `zapret2-bc2.service` nên cảnh báo im lặng đúng lúc còn sót | `^zapret2.*\.`; và luôn thử bằng unit thật, đừng chỉ tin regex |
 | bảng `nft` tự tồn tại sau khi dừng dịch vụ | `nft list tables` vẫn còn `table inet zapret2` + set 522288 phần tử sau `--uninstall` | `nft delete table inet zapret2` trong `uninstall()` |
 | khối đặt ngoài chốt `--dry` | khối xoá bảng nft tôi viết nằm **sau** `fi` của `if [ "$D" = 1 ]` ⇒ `--uninstall --dry` sẽ xoá thật | `--dry` phải được kiểm bằng cách so trạng thái trước/sau, không tin lời in |
+| gỡ gói nền để "làm trắng máy" | `gcc`, `make`, `git`, `nftables`, `ufw`, `luajit` là **gói nền**; gỡ chúng làm hỏng `paru`, `mpv`, `gamescope`, `dnsmasq`, `dkms` (pacman từ chối cả lệnh). Tệ hơn: nó **không kiểm được** gì | "trắng" = không còn hệ thống 3 tầng, **không** phải không có gói build. Muốn thử `need_pkgs` thì dùng container, đừng gỡ gói nền trên máy thật |
 | phép thử rỗng | `dig @<IPv6 Cloudflare>` timeout **dù đã mở tường** ⇒ luôn báo "đã chặn", báo đạt giả | đổi sang TCP 853 qua IPv6, đo được là phân biệt được |
 
 **Nguyên tắc rút ra:** một phép đo chỉ đáng tin khi nó phân biệt được *"đúng"* với

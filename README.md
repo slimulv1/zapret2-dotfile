@@ -157,11 +157,16 @@ Dòng cuối in ra `đạt N · LỆCH M` — N là số mục, M là số mục
 không ghi N cứng trong tài liệu vì số mục thay đổi theo máy; cứ ghi thì sẽ
 lệch, y như lần trước.
 
-> **Đã kiểm trên máy trắng.** Toàn bộ hệ thống từng được gỡ sạch khỏi máy
-> thật (zapret2, NextDNS, ufw, sysctl, cấu hình NetworkManager) rồi cài lại từ
-> đầu theo đúng các bước dưới đây. Lần đó phải sửa **8 lỗi thật** trong
-> `install.sh` mới cài được — tất cả đều là loại "chạy trơn trên máy đã có
-> sẵn, chết ngay trên máy trắng". Xem [mục 8.2 của NETWORK-DESIGN.md](docs/NETWORK-DESIGN.md).
+> **Đã kiểm trên máy trắng.** Hệ thống 3 tầng từng được gỡ sạch khỏi máy thật
+> (zapret2, NextDNS, tường ufw, 3 lớp sysctl, cấu hình NetworkManager) rồi
+> cài lại từ đầu theo đúng các bước dưới đây. Lần đó phải sửa **8 lỗi thật**
+> trong `install.sh` mới cài được — tất cả đều là loại "chạy trơn trên máy đã
+> có sẵn, chết ngay trên máy trắng".
+>
+> "Máy trắng" ở đây là **không còn hệ thống 3 tầng**, không phải máy trống
+> không gói gì. Các gói nền (`gcc`, `make`, `git`, `nftables`, `ufw`, `luajit`)
+> để nguyên — gỡ chúng sẽ làm hỏng `paru`, `mpv`, `gamescope`, `dnsmasq`,
+> `dkms`. Xem [mục 8.2 của NETWORK-DESIGN.md](docs/NETWORK-DESIGN.md).
 
 ### Nên làm thêm: API key để kiểm ID
 
