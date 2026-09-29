@@ -1,0 +1,48 @@
+#!/bin/sh
+# z2d-sysctl-guard — trả khoá hardening về đúng giá trị, NHƯNG chỉ khi đang lệch.
+#
+# VÌ SAO CẦN
+#   Đo được 20/20 lần trên máy thật: đặt `net.ipv4.ip_forward=1` rồi trả về `0`
+#   làm kernel TỰ ĐẶT LẠI `net.ipv4.conf.all.accept_redirects` từ 0 về 1.
+#   Cột chống chặn ICMP redirect bị gỡ mà không có gì báo. `t1-config.sh` bắt
+#   được (báo "LỆCH · khoá sysctl đúng thực tế=[17] mong đợi=[18]"), nhưng nó
+#   chạy tay, nên khoá có thể nằm sai suốt một thời gian dài.
+#
+#   Ma trận 9 trigger, chỉ MỘT cái làm trôi:
+#       ✓ ghi lại 0            ✓ tạo interface dummy    ✓ enp8s0 DOWN/UP
+#       ✓ ip_forward 0→1       ✓ interface len UP rồi xóa
+#       ✘ ip_forward 0→1→0  →  đúng 1 khoá bị đặt lại
+#       ✓ bật/tắt IPv6         ✓ systemd-networkd restart
+#
+# VÌ SAO CHỈ GHI KHI LỆCH
+#   Nếu ghi thẳng `sysctl -p` thì mỗi lần ghi đều phát sự kiện trên tệp procfs
+#   ⇒ systemd.path bắn lại ⇒ service chạy lại ⇒ VÒNG LẶP KHÔNG DỪNG. Đã cân
+#   nhắc điều này trước khi viết, và cách duy nhất thoát là "chỉ ghi khi lệch":
+#   ghi xong lần 2 thì không còn gì khác ⇒ không phát sự kiện ⇒ dừng.
+#
+# KHÔNG dùng `set -e`: một khoá không đọc được không được làm hỏng phần còn lại.
+set -u
+CONF=/etc/sysctl.d/60-z2d-hardening.conf
+[ -r "$CONF" ] || exit 0
+
+n_fixed=0
+while IFS= read -r line || [ -n "$line" ]; do
+  line=${line%%#*}                        # bỏ chú thích
+  case "$line" in *'='*) ;; *) continue ;; esac
+  key=${line%%=*}
+  want=${line#*=}
+  key=$(printf '%s' "$key" | tr -d ' \t')
+  want=$(printf '%s' "$want" | tr -d ' \t')
+  [ -n "$key" ] || continue
+  [ -n "$want" ] || continue
+  cur=$(sysctl -n "$key" 2>/dev/null) || continue
+  [ "$cur" != "$want" ] || continue
+  if sysctl -q -w "$key=$want" 2>/dev/null; then
+    n_fixed=$((n_fixed + 1))
+    logger -t z2d-sysctl-guard \
+      "đã trả '$key' về $want (đang là $cur) — có thể do ai đó bật rồi tắt IPv4 forwarding"
+  fi
+done < "$CONF"
+
+[ "$n_fixed" -eq 0 ] || logger -t z2d-sysctl-guard "đã sửa $n_fixed khoá"
+exit 0

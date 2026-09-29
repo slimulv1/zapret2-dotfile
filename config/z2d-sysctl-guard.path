@@ -1,0 +1,23 @@
+# z2d-sysctl-guard.path — canh biến động của forwarding và của khoá bị reset
+#
+#   /proc/sys/net/ipv4/ip_forward
+#       Kích bạo đã biết: bật rồi tắt IPv4 forwarding sẽ đặt lại
+#       `conf/all/accept_redirects`. Theo dõi TỆP NÀY bắt đúng lúc đó.
+#
+#   /proc/sys/net/ipv4/conf/all/accept_redirects
+#       Theo dõi trực tiếp khoá cần giữ. Bắt được cả khi có ai đó ghi thẳng,
+#       không chỉ khi đi qua ip_forward. Rẻ: một sự kiện, một lần đọc.
+#
+#   Đã kiểm `systemd.path` có bắt được tệp trong /proc không: CÓ, đo bằng
+#   `PathChanged=/proc/sys/net/ipv4/ip_forward` rồi đổi giá trị, service bắn.
+[Unit]
+Description=Canh biến động làm mất khoá hardening
+Documentation=file:/etc/sysctl.d/60-z2d-hardening.conf
+
+[Path]
+PathChanged=/proc/sys/net/ipv4/ip_forward
+PathChanged=/proc/sys/net/ipv4/conf/all/accept_redirects
+Unit=z2d-sysctl-guard.service
+
+[Install]
+WantedBy=multi-user.target

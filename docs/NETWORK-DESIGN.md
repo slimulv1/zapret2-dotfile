@@ -230,7 +230,7 @@ So từng phần tử của sơ đồ README với trạng thái thật:
 | [2] "đoạn đầu 1 byte" | **đã đo**: `1 byte` (`0x16`) khi zapret2 chạy, `1424 byte` khi dừng; tổng byte không đổi | khớp |
 | [2] IPv6 cùng phép đo | `curl -6` cũng ra đoạn đầu `1 byte`, 3/3 nhóm | khớp |
 | [1] DNS qua IPv6 | chặn riêng 2 IP v4 ⇒ `resolvectl` vẫn phân giải; `ss` thấy `systemd-resolve → [2a07:a8c0::]:853` | khớp |
-| [3] chặn INPUT | kernel: `hook input … policy drop` cả 2 họ | khớp |
+| [3] chặn INPUT | kernel: `hook input … policy drop` cả 2 họ; **quét từ "máy ngoài"**: chỉ 1716 `open` khi nguồn trong `192.168.0.0/16`, mọi cổng `filtered` khi nguồn ngoài | khớp |
 | [4] tường DNS v4+v6 | 3 server v4 + 2 server v6 đều `timed out` | khớp |
 
 Cái đáng nói nhất: **trước khi soi, 15 phép kiểm của installer chỉ có 3 phép
@@ -439,6 +439,91 @@ sysctl -p /etc/sysctl.d/60-z2d-hardening.conf
 Còn việc chữa lâu dài (chưa làm, cần chốt hướng) thuộc về câu hỏi: có nên thêm
 một `systemd.path` theo dõi `/proc/sys/net/ipv4/ip_forward` không.
 
+### 8.1d Đo tầng 3 từ "máy ngoài" — `INV-IN-1` (2026-09-29)
+
+Không có máy thứ hai trong nhà, nên dựng một máy ngoài bằng network namespace
+nối qua veth. Gói của nó đi đúng chuỗi `prerouting → INPUT` của máy thật —
+khác với việc đọc cấu hình, đây là phép đo thật.
+
+Máy quét tự viết (`tests/lab/scan.py`), không dùng `nmap`: cài phần mềm mới
+vào đúng máy đang kiểm rồi không dám xoá là chuyện lệ chuẩn. Quét kiểu
+`connect()` vẫn là phép thử thật — SYN đi qua đúng chuỗi, và nếu tường chặn
+thì kết nối treo.
+
+**Đối chiếu bắt buộc trước khi kết luận:** phải xác nhận `kdeconnectd` thật sự
+đang lắng nghe. Không có bước này thì "1716 filtered" cũng đúng với máy đã tắt
+dịch vụ — tức phép thử không phân biệt được tường với dịch vụ chết.
+
+```
+$ ss -tlnp | grep :1716
+LISTEN 0  50  *:1716  *:*  users:(("kdeconnectd",pid=2218,fd=19))
+```
+
+Kết quả, cùng một lần quét, chỉ khác NGUỒN:
+
+| cổng | nguồn `192.168.99.2` (trong LAN) | nguồn `203.0.113.5` (ngoài subnet) |
+|---|---|---|
+| **1716** | **open** | **filtered** |
+| 1714 1715 1763 1764 | closed (tường cho qua, không có dịch vụ) | filtered |
+| 22 53 80 443 3306 5432 8080 | filtered | filtered |
+
+Ba trạng thái là ba kết luận khác nhau, không được gộp:
+`open` = vào được · `closed` = tường cho qua nhưng không có dịch vụ ·
+`filtered` = tường DROP.
+
+**Hai bẫy đo đã dính khi làm lab này**
+
+1. **Nguồn gói không phải điều ta nghĩ.** Đã gán `192.168.99.2` cho netns nhưng
+   gói tới `192.168.1.24` đi theo route mặc định, nên kernel chọn nguồn
+   `10.98.0.2` — không thuộc `192.168.0.0/16`, rule KDE Connect không khớp.
+   Đo được: counter `ufw-user-input` = 0 dù quét đúng cổng 1716. Phải ép bằng
+   `ip route replace 192.168.1.24/32 dev vin0 src 192.168.99.2`.
+2. **`getsockopt(SO_ERROR)` không lấy được lỗi.** Nó **xoá** lỗi sau khi đọc và
+   trả 0, nên 13/13 cổng đều bị gán `closed` trong khi tường đang DROP. Phải
+   đọc errno trực tiếp từ `connect_ex` và phân biệt `ECONNREFUSED` (có RST) với
+   `ETIMEDOUT`/`EHOSTUNREACH` (không có phản hồi).
+
+**Còn chưa chứng minh:** đây vẫn là một netns, không phải một máy vật lý khác.
+Chuỗi kernel, chuỗi nft và chính sách ufw là như nhau, nhưng không thay được việc
+quét từ một máy thật trong cùng tầng mạng vật lý (ví dụ qua Wi-Fi, qua switch
+thật, hay kiểm rằng ARP/broadcast/PACKET_MATCH bị hạn chế ở tầng link).
+
+### 8.1e Canh khoá hardening — `z2d-sysctl-guard` (2026-09-29)
+
+§8.1c nêu lỗ hổng: bật rồi tắt IPv4 forwarding làm kernel đặt lại
+`net.ipv4.conf.all.accept_redirects` về `1`. Cơ chế canh:
+
+| tệp | vai trò |
+|---|---|
+| `config/z2d-sysctl-guard` | script, **chỉ ghi khoá đang lệch** |
+| `config/z2d-sysctl-guard.path` | `PathChanged` trên `/proc/sys/net/ipv4/ip_forward` và `/proc/sys/net/ipv4/conf/all/accept_redirects` |
+| `config/z2d-sysctl-guard.service` | `Type=oneshot`, gọi script |
+
+**Vì sao phải "chỉ ghi khi lệch":** nếu dùng `sysctl -p`, mỗi lần ghi đều phát
+sự kiện trên procfs ⇒ path unit bắn lại ⇒ service chạy lại ⇒ **vòng lặp không
+dừng**. Đây là điều đã cân nhắc TRƯỚC khi viết, không phải phát hiện sau.
+
+Đã kiểm `systemd.path` bắt được tệp trong `/proc` không: **có** — thử bằng
+`PathChanged=/proc/sys/net/ipv4/ip_forward` rồi đổi giá trị, service bắn.
+
+Chứng minh trên máy thật:
+
+```
+đặt accept_redirects = 1        → ngay lập: 1   → sau 3s: 0  ✔
+ip_forward 0→1→0                → ngay lập: 1   → sau 4s: 0  ✔ tự lành
+chờ 20 giây, journal đứng yên  → 4 dòng trước, 4 dòng sau  ✔ KHÔNG lặp
+```
+
+Script ghi vào `syslog` (nhãn `z2d-sysctl-guard`) mỗi khi sửa, kèm nghi phạm:
+*"có thể do ai đó bật rồi tắt IPv4 forwarding"* — để việc siết bị nới lỏng không
+còn diễn ra trong im lặng.
+
+**Giới hạn đã biết:** cơ chế này bảo vệ `accept_redirects` và mọi khoá khác trong
+tệp hardening. Nó **không** ngăn được thay đổi xấu ở tầng khác — ví dụ ai đó
+sửa trực tiếp `/etc/sysctl.d/60-z2d-hardening.conf`. Tầng bảo vệ còn lại là
+`ufw.service.d/z2d-reapply-sysctl.conf` (nạp lại mỗi lần `ufw` chạy) và
+`tests/lab/setup.sh` (nạp lại sau khi đụng `ip_forward`).
+
 ## 9. Bẫy đo đã dính — ghi lại để không lặp
 | `pacman -Qkk \| grep -c 'modified:'` | Qkk **không** dùng chữ `modified:`, nó ghi `\"... (SHA256 checksum mismatch)\"` ⇒ grep trả **0 giả**, tưởng không tệp nào bị sửa | đếm `grep -c SHA256`, và luôn đối chiếu trực tiếp tệp khi kết luận |
 | `[ -e \"/var/backups/…\" ]` bằng user thường | thư mục `root` 700 ⇒ `[ -e ]` trả **false dù tệp có thật** ⇒ kết luận \"không có trong backup\" | đo bằng `sudo -A test -e` |
@@ -453,6 +538,9 @@ một `systemd.path` theo dõi `/proc/sys/net/ipv4/ip_forward` không.
 | xoá rule ufw lấy số từ `grep -n` | `grep -n` cho **SỐ DÒNG** của output, không phải **SỐ RULE** ⇒ xoá nhầm 6 rule thật (30 → 14) | lấy từ `[ N ]`: `grep -oE '^\[[ 0-9]+\]' \\| grep -oE '[0-9]+'` |
 | `not {'a': '0'}` để kiểm dọn dẹp | dict có phần tử thì luôn truthy ⇒ teardown **luôn đỏ** dù đã dọn sạch | so **từng giá trị**: `{k: v for k, v in d.items() if v != '0'}` |
 | dựng lab bằng netns mà không nạp lại sysctl | `ip_forward=0` reset `accept_redirects` về 1 ⇒ tầng 3 yếu đi 1 khoá, `t1-config` báo LỆCH 1 | xem §8.1c; luôn `sysctl -p` tệp hardening sau khi trả `ip_forward` |
+| đo bằng `eval "$2"` mà quên `sudo` | lệnh thất bại **im lặng** ⇒ cả 8 trigger trông như đã giữ nguyên, tức kết luận sai hoàn toàn | bọc `sudo -A bash -c "$2"` và kiểm rc |
+| quét cổng rồi tin `getsockopt(SO_ERROR)` | SO_ERROR **xoá** lỗi sau khi đọc và trả 0 ⇒ 13/13 cổng thành `closed` trong khi tường đang DROP | đọc errno từ `connect_ex`; phân biệt `ECONNREFUSED` (có RST) với `ETIMEDOUT`/`EHOSTUNREACH` (không phản hồi) |
+| gán IP cho netns rồi mặc định là gói sẽ dùng IP đó | đi qua route mặc định nên kernel chọn nguồn khác ⇒ rule lọc theo nguồn không khớp, counter = 0 | ép bằng `ip route replace <đích>/32 dev <dev> src <ip>` |
 
 Đây là phần đáng giá nhất của tài liệu. Mỗi mục là một lỗi đã xảy ra thật và
 đã tốn công tìm.

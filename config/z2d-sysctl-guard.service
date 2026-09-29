@@ -1,0 +1,13 @@
+# z2d-sysctl-guard.service — chạy khi khoá hardening vừa bị đổi
+#
+# Không dùng `sysctl -p` ở đây: nó ghi cả 18 khoá, mỗi lần ghi lại phát sự kiện
+# trên procfs, path unit bắn lại → vòng lặp. Script guard chỉ ghi khoá đang lệch.
+[Unit]
+Description=Trả khoá sysctl hardening về giá trị đúng (hệ mạng 3 tầng)
+Documentation=file:/etc/sysctl.d/60-z2d-hardening.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/z2d-sysctl-guard
+# Chặn tự kích hoạt dây chuyền: nếu path unit bắn lại, service thứ hai sẽ
+# không có gì để sửa và thoát ngay, nhưng thêm hàng rào cho chắc.

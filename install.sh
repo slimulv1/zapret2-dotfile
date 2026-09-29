@@ -267,7 +267,18 @@ else
     fi
     # Những thứ do ta TẠO RA, không bao giờ có trong backup.
     rm -f /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
-    rm -f /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
+    # Gỡ bộ canh khoá hardening (§8.1c). Phải TẮT trước rồi xoá: path unit còn
+    # sống sẽ bắn vào script vừa bị xoá, và ghi lỗi mỗi lần ai đó đụng
+    # `net.ipv4.ip_forward`.
+    #
+    # KHÔNG trả các khoá sysctl về mặc định kernel. Tệp hardening bị xoá, nhưng
+    # giá trị đang nằm trong kernel vẫn giữ — hướng fail-secure: gỡ hệ 3 tầng
+    # không nên để lại máy lỏng hơn lúc chưa cài.
+    systemctl disable --now z2d-sysctl-guard.path >/dev/null 2>&1
+    rm -f /etc/systemd/system/z2d-sysctl-guard.path
+    rm -f /etc/systemd/system/z2d-sysctl-guard.service
+    rm -f /usr/local/libexec/z2d-sysctl-guard
+    systemctl daemon-reload
     # Xoá thư mục drop-in NẾU RỖNG — và chỉ khi rỗng.
     #
     #   Bản đầu chỉ xoá file, để lại /etc/systemd/system/ufw.service.d/ rỗng.
@@ -699,7 +710,9 @@ ok "đủ lệnh cần thiết"
   miss_conf=
   for f in z2d-exclude.txt z2d-hosts-user.txt z2d-pacman-ufw.hook \
            z2d-resolved.conf.template z2d-sysctl-apply z2d-sysctl.conf \
-           z2d-ufw-reapply-sysctl.conf z2d-zapret2-opt z2d-zapret2.keys; do
+           z2d-ufw-reapply-sysctl.conf z2d-zapret2-opt z2d-zapret2.keys \
+           z2d-sysctl-guard z2d-sysctl-guard.service \
+           z2d-sysctl-guard.path; do
     [ -f "$CONF/$f" ] || miss_conf="$miss_conf $f"
   done
   if [ -n "$miss_conf" ]; then
@@ -708,7 +721,7 @@ ok "đủ lệnh cần thiết"
        rồi chạy lại. Thiếu tệp thì --dry vẫn chạy được nhưng lúc cài thật
        sẽ chết giữa chừng."
   fi
-  ok "đủ 9 tệp config"
+  ok "đủ 12 tệp config"
 
   # Chấp nhận CHỮ HOA, rồi hạ về chữ thường.
   #
@@ -1395,6 +1408,24 @@ else
   grep -q "^IPT_SYSCTL=$Z2D_SYSCTL$" /etc/default/ufw || die "không trỏ được IPT_SYSCTL"
   ok "lớp 1 — IPT_SYSCTL trong /etc/default/ufw"
   # Lớp 2: drop-in systemd → phủ mỗi lần ufw.service khởi động
+  # Canh khoá hardening. Đo được 20/20 trên máy thật: bật rồi tắt IPv4
+  # forwarding khiến kernel TỰ ĐẶT LẠI `net.ipv4.conf.all.accept_redirects`
+  # từ 0 về 1 — cột chống ICMP redirect bị gỡ mà không có gì báo. Ma trận 9
+  # trigger chỉ `ip_forward 0→1→0` làm trôi, và chỉ đúng 1 khoá. Xem §8.1c.
+  #
+  # Script guard CHỈ ghi khoá đang lệch. Ghi thẳng `sysctl -p` thì mỗi lần ghi
+  # đều phát sự kiện trên procfs, path unit bắn lại, service chạy lại ⇒ vòng lặp
+  # không dừng. Đã kiểm: chờ 20 giây, journal đứng yên.
+  install -Dm755 "$CONF/z2d-sysctl-guard" \
+    /usr/local/libexec/z2d-sysctl-guard
+  install -Dm644 "$CONF/z2d-sysctl-guard.service" \
+    /etc/systemd/system/z2d-sysctl-guard.service
+  install -Dm644 "$CONF/z2d-sysctl-guard.path" \
+    /etc/systemd/system/z2d-sysctl-guard.path
+  systemctl daemon-reload
+  systemctl enable --now z2d-sysctl-guard.path \
+    || die "không bật được z2d-sysctl-guard.path — khoá hardening sẽ trôi"
+
   install -Dm644 "$CONF/z2d-ufw-reapply-sysctl.conf" \
     /etc/systemd/system/ufw.service.d/z2d-reapply-sysctl.conf
   systemctl daemon-reload; systemctl restart ufw

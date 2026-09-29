@@ -51,7 +51,10 @@ Phần nào nằm trong máy thì script lo hết. Riêng danh sách chặn thì
 │  [3]  TẦNG 3 · ufw · chặn INPUT                                                    │
 │      Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.                      │
 │                                                                                    │
-│  LUÔN LUÔN BẬT, MỌI LÚC MỞ MÁY                                                     │
+│      Đã đo trên máy này: từ một "máy ngoài" dựng bằng network                      │
+│      namespace, chỉ KDE Connect lọt qua — 1716 open khi nguồn nằm                  │
+│      trong 192.168.0.0/16, và filtered khi nguồn nằm ngoài.                        │
+│      Mọi cổng khác đều filtered. Chi tiết: [mục 8.1d](docs/NETWORK-DESIGN.md).     │
 │                                                                                    │
 │  [4]  TẦNG 2b · ufw · tường chặn DNS                                               │
 │      Chỉ cho phép hỏi NextDNS ở **53/udp** và **853/tcp**, chặn mọi nơi hỏi        │
