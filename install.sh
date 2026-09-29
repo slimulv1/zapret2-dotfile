@@ -327,6 +327,18 @@ else
       "") warn "backup không lưu policy INPUT — giữ nguyên policy hiện tại" ;;
       *)  warn "policy trong backup lạ ($_pol_saved) — giữ nguyên" ;;
     esac
+    # Quay lại đúng trạng thái BẬT/TẮT trước khi cài (xem giải thích ở bước 2).
+    _en_saved=$(head -1 "$BACKUP/ufw-enabled.txt" 2>/dev/null || true)
+    case "$_en_saved" in
+    no)  if ufw --force disable >/dev/null 2>&1; then
+           ok "ufw → tắt (đúng trạng thái trước khi cài)"
+         else
+           warn "không tắt được ufw — nó sẽ còn bật dù trước đó bạn không bật"
+         fi ;;
+    yes) ok "ufw vẫn bật (đúng trạng thái trước khi cài)" ;;
+    "")  warn "backup không lưu trạng thái bật/tắt của ufw — giữ nguyên hiện tại" ;;
+    *)   warn "trạng thái ufw trong backup lạ ('$_en_saved') — giữ nguyên" ;;
+    esac
     if [ "$n_res" = 1 ]; then
       ok "resolv.conf → stub · ufw đã nạp lại"
     else
@@ -760,7 +772,7 @@ else
   #   `--uninstall` xoá hẳn những tệp không có trong backup ⇒ cài xong, gỡ là
   #   MẤT luôn không thể quay lại.
   #   Nên: tệp có thật mà cp hỏng thì CHẾT, kèm tên tệp.
-  n_bk=0 n_bkbad=0
+  n_bk=0 n_bkbad=0 n_keepbk=0
   # `/etc/resolv.conf` PHẢI có mặt. Bản đầu không có, mà bước 5 lại `rm -f` rồi
   # tạo symlink trỏ stub ⇒ khi uninstall, tệp gốc không có chỗ nào để khôi phục.
   #   Nguy hiểm nhất khi nó vốn là TỆP THẬT chứ không phải symlink: máy dùng
@@ -773,6 +785,43 @@ else
            /etc/nftables.conf /etc/pacman.d/hooks/z2d-pacman-ufw.hook \
            /etc/resolv.conf; do
     [ -e "$f" ] || continue                       # chưa có thì không cần lưu
+    # KHÔNG ghi đè tệp backup đã có. Đây là chỗ làm HỎNG bản sao lưu.
+    #
+    #   Bản đầu ở cuối bước 2 chạy `rm -rf "$BACKUP"` rồi `mv "$st" "$BACKUP"`
+    #   — tức MỖI lần cài đều xoá sạch backup cũ, thay bằng trạng thái HIỆN
+    #   TẠI. Mà lần cài #1 đã sửa `/etc/default/ufw` (đặt
+    #   `IPT_SYSCTL=/etc/ufw/z2d-sysctl.conf`). Nên lần cài #2 sao lưu chính
+    #   tệp ĐÃ SỬA. Đo được:
+    #     backup/etc/default/ufw : sha 38ed8cb2 · có `z2d-sysctl`   ← bị đầu
+    #     /etc/default/ufw       : sha 38ed8cb2 · có `z2d-sysctl`   ← y hệt
+    #   ⇒ uninstall in "khôi phục 7 tệp" xong vẫn còn dấu z2d trong tệp của
+    #     gói, `pacman -Qkk ufw` vẫn báo SHA256 mismatch ⇒ KHÔNG BAO GIỜ quay
+    #     được về bản gốc của gói. Đây là lỗi S2 theo tiêu chí F-item.
+    #
+    #   Sửa: tệp nào đã có trong backup thì GIỮ bản cũ (lần cài đầu là lúc máy
+    #   còn nguyên). Chỉ chép những tệp backup chưa có.
+    if [ -e "$BACKUP$f" ]; then
+      # PHẢI chép bản CŨ sang $st, không được chỉ `continue`.
+      #   Vì cuối bước 2 là `rm -rf "$BACKUP"` + `mv "$st" "$BACKUP"` — tức
+      #   thay THẬT SỰ cả thư mục backup. Nếu chỉ bỏ qua thì $st không có tệp
+      #   đó, và sau mv thì backup MẤT HẲN tệp. Đo được: lần cài #2 in
+      #   "GIỮ 8 tệp từ lần cài trước" rồi `sha256sum backup/etc/default/ufw`
+      #   → "No such file or directory", rồi uninstall in "0 tệp khôi phục".
+      mkdir -p "$(dirname "$st$f")"
+      cp -a "$BACKUP$f" "$st$f" 2>/dev/null \
+        || die "giữ bản sao lưu cũ của $f thất bại — dừng, chưa sửa gì trên máy"
+      n_keepbk=$((n_keepbk + 1))
+      # "Bị đầu" chỉ có nghĩa với TỆP CỦA GÓI: tệp mà ta tự tạo (tên `z2d-*`)
+      # thì có dấu z2d là CHUYỆN BÌNH THƯỜNG, không phải backup hỏng.
+      # Lần sửa đầu báo nhầm cho 60-z2d-hardening.conf và z2d-sysctl.conf.
+      if pacman -Qo "/$f" >/dev/null 2>&1 \
+         && grep -q 'z2d-sysctl\.conf' "$BACKUP$f" 2>/dev/null; then
+        warn "bản sao lưu của $f ĐÃ BỊ ĐẦU (tệp của gói mà trong đó có dấu z2d)"
+        warn "  — bản gốc của gói đã mất. Gỡ sạch thật thì: sudo rm -rf $BACKUP"
+        warn "  rồi cài lại từ đầu."
+      fi
+      continue
+    fi
     if cp -a --parents "$f" "$st/" 2>/dev/null; then
       n_bk=$((n_bk + 1))
     else
@@ -786,6 +835,12 @@ else
   shopt -s nullglob
   ufw_dropins=(/etc/systemd/system/ufw.service.d/*.conf)
   shopt -u nullglob
+  # Giữ bản backup drop-in đầu tiên, cùng lý do ở vòng lặp tệp cấu hình.
+  if [ -d "$BACKUP/etc/systemd/system/ufw.service.d" ]; then
+    cp -a "$BACKUP/etc/systemd/system/ufw.service.d/." \
+      "$st/etc/systemd/system/ufw.service.d/" 2>/dev/null || true
+    ufw_dropins=()
+  fi
   if [ "${#ufw_dropins[@]}" -gt 0 ]; then
     if ! cp -a "${ufw_dropins[@]}" "$st/etc/systemd/system/ufw.service.d/" 2>/dev/null; then
       bad "sao lưu drop-in ufw.service.d hỏng — dừng"
@@ -795,7 +850,13 @@ else
     fi
   fi
   [ "$n_bkbad" -eq 0 ] || die "sao lưu chưa đủ — KHÔNG tiếp tục, vì uninstall sẽ mất tệp không sao lưu"
-  ok "sao lưu $n_bk tệp cấu hình"
+  if [ "$n_keepbk" -gt 0 ]; then
+    ok "sao lưu $n_bk tệp mới · GIỮ $n_keepbk tệp từ lần cài trước"
+    say "    (giữ bản cũ vì chỉ lần cài ĐẦU mới chụp được lúc máy còn nguyên;"
+    say "     nếu ghi đè thì backup chứa tệp ĐÃ SỬA và uninstall gỡ không trọn)"
+  else
+    ok "sao lưu $n_bk tệp cấu hình"
+  fi
   if [ -d "$ZAPRET_DIR" ]; then
     # Chỉ sao lưu thứ ĐANG CÓ, không giả định.
     #
@@ -818,16 +879,48 @@ else
         say "    /opt/zapret2/$sub chưa có — bỏ qua (chưa tới bước cấu hình)"
       fi
     done
-    tar -C / -czf "$st/opt-zapret2.tar.gz" opt/zapret2 || die "nén /opt/zapret2 thất bại"
-    tar -tzf "$st/opt-zapret2.tar.gz" >/dev/null 2>&1 || die "file nén hỏng — dừng"
+    # Giữ bản nén đầu tiên — "trạng thái trước khi cài" là của lần cài ĐẦU.
+    if [ -e "$BACKUP/opt-zapret2.tar.gz" ]; then
+      cp -a "$BACKUP/opt-zapret2.tar.gz" "$st/opt-zapret2.tar.gz"
+    else
+      tar -C / -czf "$st/opt-zapret2.tar.gz" opt/zapret2 || die "nén /opt/zapret2 thất bại"
+      tar -tzf "$st/opt-zapret2.tar.gz" >/dev/null 2>&1 || die "file nén hỏng — dừng"
+    fi
   fi
   ufw status numbered > "$st/ufw-numbered.txt" 2>/dev/null || true
   # Lưu policy INPUT để khôi phục khi gỡ. `ufw status verbose` bên dưới chỉ
   # để NGƯỜI ĐỌC, không được code dùng lại. Bản đầu chỉ set `ufw default deny
   # incoming` mà không lưu giá trị cũ ⇒ uninstall xong vẫn còn deny dù hệ thống
   # đã bị gỡ hết, và người dùng dễ quy nhầm cho ufw.
-  ufw status verbose 2>/dev/null | sed -n 's/^Default: \([a-z]*\) (incoming).*/\1/p' \
-    > "$st/ufw-policy-in.txt" 2>/dev/null || true
+  # Policy INPUT: GIỮ bản ghi ĐẦU TIÊN. Nếu ghi đè, lần cài #2 sẽ lưu "drop"
+  # (giá trị chính bước 3 đặt), uninstall "khôi phục" về drop ⇒ gỡ xong vẫn
+  # chặn vào — đúng cái lỗi mà việc lưu policy này sinh ra để tránh.
+  # Cờ ENABLED của ufw — thứ mà `ufw-policy-in.txt` KHÔNG nắm được.
+  #
+  #   Đo được: đặt nền `ENABLED=no` (ufw tắt) → cài (`bước 6` gọi
+  #   `ufw --force enable`, nên bật lên `yes`) → gỡ. Kết quả:
+  #       trước khi cài : ENABLED=no
+  #       sau khi cài   : ENABLED=yes
+  #       sau khi gỡ    : ENABLED=yes   ← PHẢI là `no`
+  #   Tức uninstall để lại tường đang bật dù người dùng chưa từng bật: đây là
+  #   F-item "unit enabled" không revert (S2). Hướng hậu quả là fail-secure
+  #   (tường còn chạy) nên không phải lỗ hổng, nhưng vẫn là trạng thái ngoài ý
+  #   muốn và người dùng không đoán được.
+  #
+  #   Chiều ngược lại (nền `ENABLED=yes`) thì ĐÚNG rồi: uninstall không gọi
+  #   `ufw disable` nên giữ nguyên `yes`. Đo cả hai hướng, không đoán hướng.
+  if [ -e "$BACKUP/ufw-enabled.txt" ]; then
+    cp -a "$BACKUP/ufw-enabled.txt" "$st/ufw-enabled.txt"
+  else
+    sed -n 's/^ENABLED=//p' /etc/ufw/ufw.conf 2>/dev/null | head -1 \
+      > "$st/ufw-enabled.txt" 2>/dev/null || true
+  fi
+  if [ -e "$BACKUP/ufw-policy-in.txt" ]; then
+    cp -a "$BACKUP/ufw-policy-in.txt" "$st/ufw-policy-in.txt"
+  else
+    ufw status verbose 2>/dev/null | sed -n 's/^Default: \([a-z]*\) (incoming).*/\1/p' \
+      > "$st/ufw-policy-in.txt" 2>/dev/null || true
+  fi
   nft list ruleset   > "$st/nft-ruleset.txt"   2>/dev/null || true
   { echo "Sao lưu chuẩn — $(date -Is)"
     echo "Phục hồi: sudo bash install.sh --uninstall"; } > "$st/BAO-GHI.txt"
