@@ -33,6 +33,10 @@ Phần nào nằm trong máy thì script lo hết. Riêng danh sách chặn thì
 │      nhà mạng cần nguyên gói đó để đọc tên miền, nên không khớp                    │
 │      mẫu nào và cho qua.                                                           │
 │                                                                                    │
+│      Đã đo trên máy này: tầng chạy, nhận gói thật, hỗ trợ cả IPv4 lẫn IPv6.      │
+│      Còn phần "đoạn đầu đúng 1 byte" thì CHƯA đo được — cần bắt gói, mà máy       │
+│      không cài tcpdump. Xem [mục 8.1](docs/NETWORK-DESIGN.md).                     │
+│                                                                                    │
 │      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                     │
 │      miền bị chặn ở bước [1] thì không có kết nối nào để mà sửa                    │
 │      ở bước [2].                                                                   │
@@ -134,6 +138,17 @@ sudo bash install.sh --nd-id 785fad
 ```
 
 Script tự làm hết phần còn lại:
+
+Installer **tự kiểm** rồi mới in `HOÀN TẤT`, và các phép kiểm đó nhìn vào
+**kernel** chứ không chỉ đọc tệp cấu hình:
+
+| phép kiểm | nó thật sự đo cái gì |
+|---|---|
+| `DoT thật` | `ss` thấy `systemd-resolved` đang nối cổng **853** thật |
+| `policy INPUT: kernel v4/v6` | đọc `nft list ruleset`: kernel tự nói `policy drop` |
+| `18/18 khoá sysctl` | đọc `sysctl -n` — giá trị **đang hiệu lực**, không phải dòng trong tệp |
+| `tường DNS 16 rule` | dò từng rule theo nghĩa, kiểm cả IPv4 lẫn IPv6 |
+| `route-metric` | đọc metric từng profile, đếm sai từng cái |
 
 | việc | chi tiết |
 |---|---|

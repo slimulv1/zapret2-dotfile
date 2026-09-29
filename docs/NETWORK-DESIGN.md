@@ -218,6 +218,50 @@ Nguyên nhân chung đáng ghi nhất: **mọi phép thử trước đó chạy 
 cách kiểm chứng, không chỉ sửa code: `test/t1-config.sh` chỉ đọc trạng thái
 đã cài, nó không phát hiện được installer có chạy đúng trên máy trắng hay không.
 
+### 8.2b Đối chiếu sơ đồ ↔ máy sống, và 5 chỗ sai
+
+So từng phần tử của sơ đồ README với trạng thái thật:
+
+| sơ đồ | đo được | kết luận |
+|---|---|---|
+| [1] hỏi ở cổng 853 | `ss` thấy `systemd-resolve → 45.90.28.0:853` | khớp |
+| [1] chặn / cho qua | 2 domain chặn, 3 domain qua | khớp |
+| [2] desync | queue bật cả `AF_INET` + `AF_INET6`, nhận gói thật | cơ chế đúng |
+| [2] "đoạn đầu 1 byte" | **không đo được** (thiếu tcpdump) | thiếu bằng chứng |
+| [3] chặn INPUT | kernel: `hook input … policy drop` cả 2 họ | khớp |
+| [4] tường DNS v4+v6 | 3 server v4 + 2 server v6 đều `timed out` | khớp |
+
+Cái đáng nói nhất: **trước khi soi, 15 phép kiểm của installer chỉ có 3 phép
+là hành động thật**; 12 phép còn lại đọc tệp. Sơ đồ thì lại khẳng định về
+**hành vi**. Ba chỗ đã sửa để khớp:
+
+- `DoT` trước đây chỉ `grep 'DNSOverTLS=yes'` — hỏi "ta ghi gì vào tệp", không
+  phải "máy có thật sự hỏi ở 853 không". Nay `ss` soi kết nối thật.
+- `policy incoming` trước đây hỏi `ufw status` — ufw tự báo. Nay đọc
+  `nft list ruleset`, kernel tự nói. Đo được cả `v4/v6`.
+- `--dry` không kiểm 9 tệp config: xoá `config/z2d-exclude.txt` rồi chạy
+  `--dry` vẫn in `XEM XONG`. `--dry` mất đúng tác dụng bắt lỗi trước khi cài.
+
+Và 3 lỗi tra ra khi rà từng dòng:
+
+1. **`--nd-key --dry` biến xem trước thành cài thật.** `--nd-key` nuốt cờ
+   `--dry` làm giá trị của nó, `DRY` vẫn 0, script cài thật và in `HOÀN TẤT`.
+   Đo được: `zapret2` restart lúc 11:39:37. Nay `need_val` chặn giá trị bắt
+   đầu bằng `-`.
+2. **ID NextDNS viết HOA bị từ chối.** Regex `^[0-9a-f]{6}$` chặn `785FAD`, dù
+   API trả 200 cho cả ba kiểu hoa thường và bắt tay TLS với
+   `<id>.dns.nextdns.io` cho cả ba đều trả 238 byte. Nay nhận cả hai và hạ
+   về chữ thường.
+3. **Con số mong đợi của phép kiểm tự thêm là bịa.** Lần đầu viết
+   `chk "policy INPUT" … "1/1"` mà không đo trước; chạy thật ra `2/2` vì tôi
+   đếm không tách được họ. Nay đếm theo bảng (`table ip` / `table ip6`).
+
+**Bài học đắt nhất của lượt này:** hai phép kiểm mới tôi viết **đều sai ngay
+lần đầu** — mẫu `grep 'systemd-resolve.*:853'` sai thứ tự (`ss` in địa chỉ
+trước tên tiến trình) nên không bao giờ khớp; và nhãn 33 ký tự vượt giới hạn
+32 mà chính chốt bảo vệ trong `chk` bắt được. Cả hai chỉ lộ ra khi chạy thật.
+Một phép kiểm mới chỉ đáng tin sau khi **tiêm lỗi thật** và thấy nó bắt.
+
 **Lần thứ hai (sau khi đã sửa 8 lỗi): cài thành công ngay lần đầu, không lộ
 thêm lỗi nào.** Vì máy lần trước đã có `/opt/zapret2` do lần chết giữa chừng,
 nên nhánh `clone` chưa từng chạy trọn với bản đã sửa. Lần này chạy đủ 4 nhánh
@@ -300,7 +344,12 @@ thời điểm đó.
 | khối đặt ngoài chốt `--dry` | khối xoá bảng nft tôi viết nằm **sau** `fi` của `if [ "$D" = 1 ]` ⇒ `--uninstall --dry` sẽ xoá thật | `--dry` phải được kiểm bằng cách so trạng thái trước/sau, không tin lời in |
 | bộ đo của tôi tự báo sai ba lần | (a) `awk '/^300 /'` không khớp vì dòng procfs **có thụt lề đầu dòng** ⇒ tầng 1 bị báo là không nhận gói; (b) `diff <(sudo cat A) <(sudo cat B)` cho kết quả bịa vì `sudo` trong process substitution; (c) `awk '/^done$/'` không khớp `  done` ⇒ trích ra **file rỗng** rồi kết luận "fix hỏng 60/60" | đo lại bằng `$1==300`; so sánh bằng file trên đĩa; kiểm tra file trích có dòng trước khi tin. **Nguyên tắc: phép đo hỏng thì báo "không đo được", không báo số** |
 | bỏ qua nội dung của systemd | `install.sh` copy 3 unit giống upstream nhưng chỉ enable 1, comment lại viết như bám sát cả hành vi | đọc `install_easy.sh` đối chiếu từng dòng `enable`; nếu cố ý khác thì nói thẳng và nêu lý do |
-| gỡ gói nền để "làm trắng máy" | `gcc`, `make`, `git`, `nftables`, `ufw`, `luajit` là **gói nền**; gỡ chúng làm hỏng `paru`, `mpv`, `gamescope`, `dnsmasq`, `dkms` (pacman từ chối cả lệnh). Tệ hơn: nó **không kiểm được** gì | "trắng" = không còn hệ thống 3 tầng, **không** phải không có gói build. Muốn thử `need_pkgs` thì dùng container, đừng gỡ gói nền trên máy thật |
+| mẫu `grep` sai thứ tự trong một dòng | `ss` in `… 45.90.28.0:853 users:(("systemd-resolve",…))` — địa chỉ **trước** tên tiến trình, nên `grep 'systemd-resolve.*:853'` không bao giờ khớp và cảnh báo báo đạt giả | tách hai lần `grep` trên cùng dòng: `\| grep systemd-resolve \| grep -q ':853'` |
+| đặt số mong đợi mà không đo trước | `chk "policy INPUT" … "1/1"` viết từ trí nhớ; chạy thật ra `2/2` vì đếm không tách được họ IPv4/IPv6 | đếm theo bảng (`table ip` / `table ip6`) trước khi viết kỳ vọng |
+| `--dry` không kiểm tệp cấu hình | xoá `config/z2d-exclude.txt`, `--dry` vẫn in `XEM XONG` exit 0 — công cụ xem trước không bắt được lỗi nó sinh ra để bắt | kiểm đủ 9 tệp ở bước 1; `--dry` phải **chặt** chứ không chỉ báo |
+| tham số nuốt cờ khác | `--nd-key --dry` ⇒ `--nd-key` ăn cờ `--dry`, `DRY=0`, script **cài thật** | `need_val` chặn giá trị bắt đầu bằng `-` |
+| đo bằng regex khi cần chuỗi có nhiều thứ tự | `grep 'A.*B'` trên dòng thực tế là `B … A` | tách thành nhiều `grep`, hoặc `awk` với điều kiện rời |
+| gỡ gói nền để "làm trắng máy" || gỡ gói nền để "làm trắng máy" | `gcc`, `make`, `git`, `nftables`, `ufw`, `luajit` là **gói nền**; gỡ chúng làm hỏng `paru`, `mpv`, `gamescope`, `dnsmasq`, `dkms` (pacman từ chối cả lệnh). Tệ hơn: nó **không kiểm được** gì | "trắng" = không còn hệ thống 3 tầng, **không** phải không có gói build. Muốn thử `need_pkgs` thì dùng container, đừng gỡ gói nền trên máy thật |
 | phép thử rỗng | `dig @<IPv6 Cloudflare>` timeout **dù đã mở tường** ⇒ luôn báo "đã chặn", báo đạt giả | đổi sang TCP 853 qua IPv6, đo được là phân biệt được |
 
 **Nguyên tắc rút ra:** một phép đo chỉ đáng tin khi nó phân biệt được *"đúng"* với

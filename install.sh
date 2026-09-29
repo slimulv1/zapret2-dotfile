@@ -95,10 +95,28 @@ Cần sudo. Mất mạng thì chạy lại đúng dòng này:
 USAGE
 }
 
+# `need_val <tên> <giá trị>` — chặn giá trị trông như TÙY CHỌN khác.
+#
+#   KHÔNG có hàm này thì `--nd-key --dry` bị đọc thành "đường dẫn tên là
+#   --dry", cờ --dry bị nuốt, DRY vẫn bằng 0, và script CÀI THẬT trong khi
+#   người dùng tưởng mình chỉ xem trước. Đo được trên máy thật: lệnh đó in ra
+#   "HOÀN TẤT — 3 tầng đã dựng" và restart zapret2 lúc 11:39:37.
+#
+#   Một lỗi chính tả biến thao tác chỉ-đọc thành thao tác sửa máy, nên chặn
+#   ở đây chứ không phải để cho chạy rồi mới báo lỗi.
+need_val() { # need_val <tên tùy chọn> <giá trị theo sau>
+  case "$2" in
+    -*) die "$1 cần một giá trị, nhưng thấy '$2' — có lẽ bạn quên viết giá trị?
+        (xem --help)" ;;
+  esac
+}
+
 while [ $# -gt 0 ]; do
-  case "$1" in
-    --nd-id)     [ $# -ge 2 ] || die "--nd-id cần một giá trị"; ND_ID=$2; shift 2 ;;
-    --nd-key)    [ $# -ge 2 ] || die "--nd-key cần một đường dẫn"; ND_KEY=$2; shift 2 ;;
+case "$1" in
+--nd-id)     [ $# -ge 2 ] || die "--nd-id cần một giá trị"
+            need_val "--nd-id"  "$2"; ND_ID=$2; shift 2 ;;
+--nd-key)    [ $# -ge 2 ] || die "--nd-key cần một đường dẫn"
+            need_val "--nd-key" "$2"; ND_KEY=$2; shift 2 ;;
     --dry)       DRY=1; shift ;;
     --uninstall) ACTION=uninstall; shift ;;
     -h|--help)   usage; exit 0 ;;
@@ -621,8 +639,45 @@ if [ "$ACTION" = install ]; then
   #   git, make, gcc: clone + build zapret2
   need_pkgs nftables ufw networkmanager procps-ng iproute2 git make gcc
   ok "đủ lệnh cần thiết"
-  printf '%s' "$ND_ID" | grep -qE '^[0-9a-f]{6}$' \
-    || die "--nd-id phải 6 ký tự hex (0-9a-f), bạn đưa '${ND_ID:-<rỗng>}' — lấy ở my.nextdns.io"
+ok "đủ lệnh cần thiết"
+  # Kiểm đủ TẬP config cần thiết, ngay ở bước 1.
+  #
+  #   Bản đầu không kiểm. Đo được: xoá `config/z2d-exclude.txt` rồi chạy
+  #   `--dry`, nó vẫn in "XEM XONG — chưa thay đổi gì cả" và exit 0. Nghĩa là
+  #   `--dry` — thứ đúng ra để BẮT LỖI TRƯỚC KHI CÀI — lại không thấy lỗi.
+  #   Chạy thật thì chết muộn ở bước 4 với câu "cần đúng 9 dải loại trừ,
+  #   config đang có 0", trỏ nhầm vào con số thay vì vào tệp đang thiếu.
+  #
+  #   Liệt kê đủ 9 tệp thay vì chỉ kiểm thư mục `config/` có tồn tại: thư mục
+  #   có nhưng thiếu một tệp thì vẫn hỏng, và đó mới là lỗi hay gặp (clone
+  #   thiếu, cài tay dán bừa).
+  miss_conf=
+  for f in z2d-exclude.txt z2d-hosts-user.txt z2d-pacman-ufw.hook \
+           z2d-resolved.conf.template z2d-sysctl-apply z2d-sysctl.conf \
+           z2d-ufw-reapply-sysctl.conf z2d-zapret2-opt z2d-zapret2.keys; do
+    [ -f "$CONF/$f" ] || miss_conf="$miss_conf $f"
+  done
+  if [ -n "$miss_conf" ]; then
+    die "thiếu tệp config trong $CONF:$miss_conf
+       Lấy lại repo:  git -C $REPO_DIR pull
+       rồi chạy lại. Thiếu tệp thì --dry vẫn chạy được nhưng lúc cài thật
+       sẽ chết giữa chừng."
+  fi
+  ok "đủ 9 tệp config"
+
+  # Chấp nhận CHỮ HOA, rồi hạ về chữ thường.
+  #
+  #   Bản đầu dùng `^[0-9a-f]{6}$` nên từ chối `785FAD`. Nhưng ID hoa VẪN ĐÚNG:
+  #   đo được — API NextDNS trả 200 cho cả `785fad`, `785FAD`, `785Fad`; và
+  #   bắt tay TLS thẳng với `<id>.dns.nextdns.io` cho cả ba đều trả về đúng
+  #   238 byte. Tức là chỗ bị chặn là hoàn toàn dùng được, và người dùng dán
+  #   ID từ nguồn nào đó in hoa thì bị chặn với lý do sai.
+  #
+  #   Hạ về chữ thường để `785FAD.dns.nextdns.io` không bao giờ lọt vào
+  #   `resolved.conf` — file đó được so khớp byte với bản trong repo.
+  printf '%s' "$ND_ID" | grep -qE '^[0-9a-fA-F]{6}$' \
+    || die "--nd-id phải 6 ký tự hex (0-9a-fA-F), bạn đưa '${ND_ID:-<rỗng>}' — lấy ở my.nextdns.io"
+  ND_ID=${ND_ID,,}
   ok "ID NextDNS: $ND_ID"
   nd_check
 fi
@@ -1254,7 +1309,52 @@ chk "MODE_FILTER"         "$(grep -oP '^MODE_FILTER=\K.*' "$ZAPRET_DIR/config")"
 chk "danh sách user rỗng" "$(grep -cvE '^\s*(#|$)' "$ZAPRET_DIR/ipset/zapret-hosts-user.txt" || true)" 0
 chk "số dải exclude"      "$(grep -cvE '^\s*(#|$)' "$ZAPRET_DIR/ipset/zapret-hosts-user-exclude.txt" || true)" 9
 chk "nameserver"          "$(grep -c '^nameserver' /run/systemd/resolve/resolv.conf)" 4
-chk "DoT"                 "$(grep -c '^DNSOverTLS=yes' /etc/systemd/resolved.conf)" 1
+
+  # DoT: kiểm KẾT NỐI THẬT, không chỉ đọc tệp.
+  #
+  #   Bản đầu chỉ `grep -c '^DNSOverTLS=yes'` — tức đọc dòng cấu hình. Đó là
+  #   câu hỏi "ta đã ghi gì vào tệp", KHÔNG phải "máy có thật sự hỏi ở 853
+  #   không". Sơ đồ README lại khẳng định: "Hỏi tên miền ở cổng 853". Nên phải
+  #   nhìn kết nối thật của systemd-resolved.
+  #
+  #   Đo được kiểu mới: `ss -tnp` cho thấy
+  #       systemd-resolve  192.168.1.24:40682 → 45.90.28.0:853
+  #   tức khẳng định của sơ đồ là đúng.
+  #
+  #   Có thời gian chờ nên báo "không xác nhận được" thay vì báo đạt, và KHÔNG
+  #   chết: báo đạt khi không biết là báo đạt giả — thứ tệ nhất.
+  dot_seen=no
+  for _try in 1 2 3 4 5 6 7 8 9 10; do
+    resolvectl query --cache=no "z2d-$_try.does-not-exist.invalid" >/dev/null 2>&1
+    # Thứ tự là quan trọng: `ss` in địa chỉ đích TRƯỚC tên tiến trình
+    # (`… 45.90.28.0:853 users:(("systemd-resolve",…))`), nên mẫu
+    # `systemd-resolve.*:853` KHÔNG BAO GIỜ khớp — lần đầu viết vậy thì cảnh
+    # báo "không xác nhận được" dù kết nối DoT có thật. Tách thành hai lần
+    # grep trên cùng một dòng: thứ tự nào cũng khớp.
+    if ss -tnp 2>/dev/null | grep systemd-resolve | grep -q ':853'; then dot_seen=yes; break; fi
+    sleep 0.3
+  done
+  if [ "$dot_seen" = yes ]; then
+    ok "DoT thật — systemd-resolved đang nối cổng 853"
+  else
+    warn "KHÔNG xác nhận được kết nối DoT ở cổng 853 trong ~3 giây"
+    warn "tệp cấu hình vẫn có DNSOverTLS=$(grep -c '^DNSOverTLS=yes' /etc/systemd/resolved.conf)"
+    warn "kiểm tay:  ss -tnp | grep systemd-resolve"
+    warn "          (không phải lỗi chắc chắn — có thể chỉ là chưa có truy vấn nào)"
+  fi
+
+  # Policy INPUT: đọc KERNEL, không đọc lời khai của ufw.
+  #
+  #   Bản đầu hỏi `ufw status verbose` — đó là ufw tự báo. Nhưng ufw có thể
+  #   "active" mà ruleset chưa nạp, hoặc nạp thiếu. Chỗ kiểm được là
+  #   `nft list ruleset`: kernel tự nói `hook input ... policy drop`.
+  #   Đo được: `hook input priority filter; policy drop;` cho cả IPv4 và IPv6.
+  _pol=$(nft list ruleset 2>/dev/null | awk '
+    /^table /  { f = ($2 == "ip6") ? "v6" : (($2 == "ip") ? "v4" : "") }
+    /hook input/ && /policy drop/ { if (f != "") c[f]++ }
+    END { printf "%d/%d", c["v4"]+0, c["v6"]+0 }')
+  chk "policy INPUT: kernel v4/v6" "$_pol" "1/1"
+
 chk "tường DNS 16 rule"   "$(wall_complete && echo yes || echo no)" yes
 chk "KDE Connect 4 rule"  "$(kde_complete && echo yes || echo no)" yes
 chk "policy incoming"     "$(ufw status verbose 2>/dev/null | sed -n 's/^Default: \([a-z]*\) (incoming).*/\1/p')" deny
