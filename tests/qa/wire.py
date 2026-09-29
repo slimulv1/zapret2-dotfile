@@ -85,9 +85,13 @@ def _parse(pkt: bytes):
     sp, dp = struct.unpack("!HH", pkt[poff:poff + 4])
     doff = (pkt[poff + 12] >> 4) * 4
     flags = pkt[poff + 13]
+    # `raw` giữ nguyên tải trả về (không phải chuỗi hex) — cần byte thô để đọc
+    # SNI. 6 byte đầu thì không đủ: ClientHello có tên miền hay không chỉ lộ ra
+    # sau khi tách hết cấu trúc TLS.
     return dict(sp=sp, dp=dp, fam=fam, flags=flags,
                 syn=bool(flags & 0x02),
-                pay=len(pkt[poff + doff:]), head=pkt[poff + doff:poff + doff + 6].hex())
+                pay=len(pkt[poff + doff:]), head=pkt[poff + doff:poff + doff + 6].hex(),
+                raw=pkt[poff + doff:])
 
 
 def first_segments(iface: str, dport: int = 443, seconds: float = 12.0):
@@ -117,7 +121,7 @@ def first_segments(iface: str, dport: int = 443, seconds: float = 12.0):
                 continue
             if key not in flows or r["pay"] == 0:
                 continue
-            flows[key]["segs"].append((r["pay"], r["head"]))
+            flows[key]["segs"].append((r["pay"], r["head"], r["raw"]))
     finally:
         s.close()
     out = []
@@ -128,7 +132,11 @@ def first_segments(iface: str, dport: int = 443, seconds: float = 12.0):
             "fam": f["fam"],
             "first": f["segs"][0][0],
             "first_head": f["segs"][0][1],
-            "total": sum(p for p, _ in f["segs"]),
+            # byte thô của đoạn đầu: cần để đọc SNI, tức trả lời "một DPI
+            # chỉ soi đoạn đầu thì có thấy tên miền không".
+            "first_bytes": f["segs"][0][2],
+            "all_bytes": [p for p, _, _ in f["segs"]],
+            "total": sum(p for p, _, _ in f["segs"]),
             "nseg": len(f["segs"]),
         })
     return out

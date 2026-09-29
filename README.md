@@ -16,35 +16,35 @@ chính là chỗ hỏi tên miền.
 
 ```
 ┌─────────────────────────────────── MÁY CỦA BẠN ────────────────────────────────────┐
-│                                                                                    │
-│  KHI BẠN MỞ MỘT TRANG WEB                                                          │
-│                                                                                    │
-│  [1]  TẦNG 2 · NextDNS qua DoT                                                     │
-│      Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn                    │
-│      tuỳ danh sách nằm trên đám mây của bạn.                                       │
-│                                                                                    │
-│      << ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                       │
-│      Danh sách chặn nằm trên đám mây chứ không nằm trong máy,                      │
-│      nên phần cài đặt bên dưới chỉ kiểm được, không bật được.                      │
-│                                                                                    │
-│  [2]  TẦNG 1 · zapret2 · desync                                                    │
-│      Mở kết nối tới IP vừa nhận được, rồi cắt gói mở đầu                           │
-│      thành hai đoạn, đoạn đầu chỉ mang 1 byte. Bộ lọc của                          │
-│      nhà mạng cần nguyên gói đó để đọc tên miền, nên không                         │
-│      khớp mẫu nào và cho qua.                                                      │
-│                                                                                    │
-│      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                     │
-│      miền bị chặn ở bước [1] thì bước [2] không còn kết nối                        │
-│      nào để mà sửa.                                                                │
-│                                                                                    │
-│  KHI CÓ AI GỌI TỚI MÁY BẠN                                                         │
-│                                                                                    │
-│  [3]  TẦNG 3 · ufw · chặn INPUT                                                    │
-│      Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.                      │
-│                                                                                    │
-│  [4]  TẦNG 2b · ufw · tường chặn DNS                                               │
-│      Chỉ cho phép hỏi NextDNS ở 53/udp và 853/tcp, chặn mọi                        │
-│      nơi hỏi DNS khác — cả IPv4 lẫn IPv6.                                          │
+│                                                                                     │
+│  KHI BẠN MỞ MỘT TRANG WEB                                                           │
+│                                                                                     │
+│  [1]  TẦNG 2 · NextDNS qua DoT                                                      │
+│      Hỏi tên miền ở cổng 853. NextDNS trả về IP thật, hoặc chặn                     │
+│      tuỳ danh sách nằm trên đám mây của bạn.                                        │
+│                                                                                     │
+│      << ĐÂY LÀ CHỖ DUY NHẤT QUYẾT ĐỊNH CHẶN.                                        │
+│      Danh sách chặn nằm trên đám mây chứ không nằm trong máy,                       │
+│      nên phần cài đặt bên dưới chỉ kiểm được, không bật được.                       │
+│                                                                                     │
+│  [2]  TẦNG 1 · zapret2 · desync                                                     │
+│      Mở kết nối tới IP vừa nhận được, bơm một gói giả 684 byte                      │
+│      rồi cắt phần thật thành hai đoạn. Đoạn đầu trên dây là gói giả,                │
+│      không hề chứa tên miền thật. Bộ lọc của nhà mạng cần nguyên                    │
+│      gói đó để đọc tên miền, nên không khớp mẫu nào và cho qua.                     │
+│                                                                                     │
+│      Tầng này không chặn gì cả — nó chỉ chống bị chặn. Nếu tên                      │
+│      miền bị chặn ở bước [1] thì bước [2] không còn kết nối                         │
+│      nào để mà sửa.                                                                 │
+│                                                                                     │
+│  KHI CÓ AI GỌI TỚI MÁY BẠN                                                          │
+│                                                                                     │
+│  [3]  TẦNG 3 · ufw · chặn INPUT                                                     │
+│      Chặn mọi thứ đi vào máy, trừ KDE Connect trong mạng LAN.                       │
+│                                                                                     │
+│  [4]  TẦNG 2b · ufw · tường chặn DNS                                                │
+│      Chỉ cho phép hỏi NextDNS ở 53/udp và 853/tcp, chặn mọi                         │
+│      nơi hỏi DNS khác — cả IPv4 lẫn IPv6.                                           │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -66,7 +66,7 @@ Mỗi tầng đều có phép đo, không phải lời hứa:
 | tầng | đo bằng gì | kết quả |
 |---|---|---|
 | **[1]** NextDNS qua DoT | `ss` bắt `systemd-resolved` nối cổng 853 | tên miền bị chặn → `NXDOMAIN`, tên miền thường → IP thật |
-| **[2]** zapret2 cắt đoạn | bắt gói thẳng trên dây, tắt TSO/GSO trước khi đo | đoạn đầu **1 byte** (`0x16`), cả IPv4 lẫn IPv6 |
+| **[2]** zapret2 cắt đoạn | bắt gói thẳng trên dây, tắt TSO/GSO trước khi đo | đoạn đầu **không chứa tên miện thật** (tách SNI ra = `None`), cả IPv4 lẫn IPv6; luồng thật giữ nguyên từng byte |
 | [2] — tác dụng thật | lab DPI giả trong network namespace | zapret2 **bật** → `HTTP 200` · **tắt** → bị chặn |
 | **[3]** chặn INPUT | quét từ một "máy ngoài" cùng netns | chỉ `1716` mở khi nguồn trong `192.168.0.0/16`; ngoài subnet thì chặn hết |
 | **[4]** tường DNS | hỏi 8 resolver lạ, cả hai họ, cả `tcp` | `8/8` không có câu trả lời, và counter của rule DENY tăng |

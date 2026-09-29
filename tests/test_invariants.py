@@ -208,25 +208,47 @@ def test_dns_fails_closed_when_nextdns_unreachable(require_installed):
 
 
 # --------------------------------------------------------------------------- #
-# INV-DESYNC-1 — đoạn đầu đúng 1 byte
+# INV-DESYNC-1 — đoạn đầu không lộ tên miện thật
 # --------------------------------------------------------------------------- #
+#: Hai tên miền dùng để đo. Phải biết trước tên thật thì mới đòi hỏi được
+#: "đoạn đầu KHÔNG chứa tên thật" — không có nó thì bất biến vô nghĩa.
+DESYNC_PROBES = [
+    ("github.com", "https://github.com"),
+    ("www.wikipedia.org", "https://www.wikipedia.org"),
+]
+
+
 @pytest.mark.network
 @pytest.mark.slow
 def test_desync_first_segment_is_exactly_one_byte(iface, offload_off, raw_socket, needs_installed):
-    """Đoạn TCP đầu tiên mang ClientHello phải đúng 1 byte (0x16).
+    """Đoạn TCP đầu tiên mang dữ liệu **không được lộ tên miền thật**.
 
     Bắt buộc có `offload_off`: nếu TSO/GSO còn bật, host thấy MỘT khối lớn dù
     trên dây có nhiều đoạn nhỏ ⇒ đo ra số sai hoàn toàn.
+
+    VÌ SAO KHÔNG KIỂM "ĐOẠN ĐẦU 1 BYTE" NỮA
+    Bản cũ đòi đoạn đầu đúng 1 byte, và nó **đúng** với cấu hình `multisplit`
+    trần. Nhưng nó đo *hình thức* của chiến lược chứ không đo *mục đích* của nó.
+    Đổi sang `fake` + `multisplit:pos=1,midsld` thì đoạn đầu trở thành gói giả
+    ~684 byte và bản cũ đỏ — dù cấu hình mới **mạnh hơn**.
+
+    Cái thực sự phải giữ là: một DPI chỉ soi đoạn đầu thì **không thấy** tên
+    miền thật. Nên đo bằng SNI. Cách này đúng với cả cấu hình cũ lẫn mới, và
+    trả lời đúng câu hỏi.
     """
+    import subprocess, sys, threading, time
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "lab"))
+    from dpi import parse_sni
+
     assert all(v == "off" for v in offload_off.values()), \
         f"offload chưa tắt: {offload_off}"
     assert run(["systemctl", "is-active", "zapret2"], sudo=True, timeout=20).out.strip() \
         == "active", "zapret2 không chạy — không có gì để đo desync"
 
-    import subprocess, threading, time
     def traffic():
         time.sleep(2)
-        for u in ("https://github.com", "https://www.wikipedia.org"):
+        for _, u in DESYNC_PROBES:
             subprocess.run(["curl", "-s", "-o", "/dev/null", "-m", "8",
                             "--no-keepalive", u], capture_output=True, timeout=15)
             time.sleep(1)
@@ -235,14 +257,25 @@ def test_desync_first_segment_is_exactly_one_byte(iface, offload_off, raw_socket
     t.join(timeout=5)
 
     assert segs, "không bắt được luồng nào tới cổng 443 — phép đo hỏng, không kết luận"
+
+    real = {h for h, _ in DESYNC_PROBES}
     for s in segs:
-        assert s["first"] == 1, (
-            f"nhóm {s['fam']} có đoạn đầu {s['first']} byte, mong đợi 1 — "
-            f"chi tiết: {s}"
+        sni = parse_sni(s["first_bytes"])
+        assert sni not in real, (
+            f"nhóm {s['fam']}: đoạn đầu {s['first']} byte LỘ tên miền thật "
+            f"({sni!r}) — DPI chỉ soi đoạn đầu là thấy hết, desync không còn tác dụng"
         )
         assert s["first_head"].startswith("16"), (
             f"byte đầu = {s['first_head'][:2]}, mong đợi 16 (0x16 = TLS handshake)"
         )
+        # desync có thật sự chạy không: ClientHello phải bị cắt, tức đoạn đầu
+        # không giải mã được trọn ClientHello. Nếu không có mảnh này thì bất
+        # biến trên có thể "đúng" chỉ vì không bắt được ClientHello nào.
+        assert s["nseg"] > 1, (
+            f"nhóm {s['fam']}: chỉ {s['nseg']} đoạn cho cả luồng — "
+            f"ClientHello không bị cắt, có lẽ desync không chạy"
+        )
+
 
 
 # --------------------------------------------------------------------------- #

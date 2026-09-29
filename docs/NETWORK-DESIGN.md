@@ -76,22 +76,46 @@ HARDENING ───────────────────────�
 ```
 MODE_FILTER=hostlist        + danh sách user RỖNG  ⇒ không còn mệnh đề lọc
 NFQWS2_PORTS_TCP=80,443     ⇒ phạm vi: TCP 80 và 443, KHÔNG phải mọi cổng
-NFQWS2_PORTS_UDP=           (rỗng) ⇒ bỏ qua UDP
---payload=tls_client_hello --lua-desync=multisplit:pos=1
+NFQWS2_PORTS_UDP=443        ⇒ thêm QUIC (HTTP/3)
 ```
 
 ### Đo được: tầng 1 CẮT thật, không phải chỉ nhận gói
 
-`multisplit:pos=1` cắt ClientHello làm hai đoạn, đoạn đầu mang **1 byte**.
-Đo bằng cách nhìn gói tin thật trên `enp8s0` (raw socket `AF_PACKET`, không cần
-tcpdump), tách theo từng kết nối, đo chiều dài đoạn TCP đầu tiên:
+Cấu hình hiện tại (xem `docs/RESEARCH-DPI.md` vì sao chọn):
 
-| | đoạn đầu của 5 kết nối tới :443 |
-|---|---|
-| tầng 1 **BẬT** | `[1, 1, 1, 1, 1]` byte |
-| tầng 1 **TẮT** | `[1570, 1570, 1570, 1571, 1573]` byte |
+```
+--payload=tls_client_hello
+  --lua-desync=fake:blob=fake_default_tls:tcp_md5:tls_mod=rnd,rndsni,dupsid,padencap
+  --lua-desync=multisplit:pos=1,midsld
+```
 
-A/B lặp 3/3 vòng, kết quả y hệt nhau.
+Cấu hình này **bơm một gói giả 684 byte** trước dữ liệu thật, rồi **cắt** phần
+thật. Đo bằng cách nhìn gói tin thật trên `enp8s0` (raw socket `AF_PACKET`, không
+cần tcpdump), tách theo từng kết nối:
+
+| | IPv4 | IPv6 |
+|---|---|---|
+| tầng 1 **BẬT** — đoạn đầu | 684 byte (gói giả) | 684 byte (gói giả) |
+| tầng 1 **BẬT** — số đoạn | 10 | 11 |
+| tầng 1 **BẬT** — tổng | 2591 byte | 2604 byte |
+| tầng 1 **TẮT** — đoạn đầu | 1424 byte | 1388 byte |
+| tầng 1 **TẮT** — tổng | 1907 byte | 1920 byte |
+
+**Số cần đọc là phép trừ, không phải con số "đẹp"**:
+
+```
+IPv4:  1907 + 684 = 2591   ✓
+IPv6:  1920 + 684 = 2604   ✓
+```
+
+Luồng thật **giữ nguyên từng byte**; gói giả là cộng thêm đúng 684 byte, không
+thay một byte nào của dữ liệu thật. Đây là bằng chứng mạnh hơn hẳn so với kiểu
+kiểm cũ (xem §8.1b — kiểm cũ chỉ đúng với `multisplit` trần, vì chiến lược đó
+chỉ **đảo thứ tự** chứ không **bơm thêm**).
+
+Và đoạn đầu **không chứa tên miền thật**: tách SNI ra được `None` ở cả IPv4 lẫn
+IPv6, cả khi tầng 1 bật. Đó mới là mục đích của desync — một DPI chỉ soi đoạn
+đầu thì không thấy tên miền.
 
 ### Nhưng tầng 1 KHÔNG giúp ích trên đường này
 
@@ -227,8 +251,8 @@ So từng phần tử của sơ đồ README với trạng thái thật:
 | [1] hỏi ở cổng 853 | `ss` thấy `systemd-resolve → 45.90.28.0:853` | khớp |
 | [1] chặn / cho qua | 2 domain chặn, 3 domain qua | khớp |
 | [2] desync | queue bật cả `AF_INET` + `AF_INET6`, nhận gói thật | cơ chế đúng |
-| [2] "đoạn đầu 1 byte" | **đã đo**: `1 byte` (`0x16`) khi zapret2 chạy, `1424 byte` khi dừng; tổng byte không đổi | khớp |
-| [2] IPv6 cùng phép đo | `curl -6` cũng ra đoạn đầu `1 byte`, 3/3 nhóm | khớp |
+| [2] "đoạn đầu không lộ tên miền" | **đã đo**: tách SNI đoạn đầu = `None` khi zapret2 chạy; luồng thật giữ nguyên (`1907+684=2591`, `1920+684=2604`) | khớp |
+| [2] IPv6 cùng phép đo | `curl -6` cho đoạn đầu 684 byte, tổng 2604 = 1920 + 684 | khớp |
 | [1] DNS qua IPv6 | chặn riêng 2 IP v4 ⇒ `resolvectl` vẫn phân giải; `ss` thấy `systemd-resolve → [2a07:a8c0::]:853` | khớp |
 | [3] chặn INPUT | kernel: `hook input … policy drop` cả 2 họ; **quét từ "máy ngoài"**: chỉ 1716 `open` khi nguồn trong `192.168.0.0/16`, mọi cổng `filtered` khi nguồn ngoài | khớp |
 | [4] tường DNS v4+v6 | 3 server v4 + 2 server v6 đều `timed out` | khớp |
@@ -329,14 +353,14 @@ thời điểm đó.
 
 ---
 
-### 8.1b Đo "đoạn đầu 1 byte" — không cần `tcpdump`, và những bẫy của nó
+### 8.1b Đo desync trên dây — không cần `tcpdump`, và những bẫy của nó
 
 Trước đây mục này ghi *"không đo được, thiếu tcpdump"*. Sai: `tcpdump` chỉ là
 một cách, và cách đó còn **không đáng tin** khi offload còn bật. Đo bằng raw
 socket `AF_PACKET` tự phân tích header, không cài gói nào.
 
 ```python
-# /tmp/z2d-qa/sniff.py — lược
+# tests/qa/wire.py — lược
 s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0003))
 s.bind(('enp8s0', 0))          # chỉ bắt trên đúng NIC đang định tuyến
 # bóc Ethernet → (VLAN) → IPv4/IPv6 → TCP; gom đoạn đầu tiên mang dữ liệu
@@ -355,15 +379,31 @@ ethtool -K enp8s0 tso on  gso on  gro on    # bắt buộc bật lại sau khi �
 
 **Bẫy 2 — phải có nhánh đối chứng.** Một con số "1 byte" mà không có nhánh
 "tắt zapret2" thì không chứng minh gì: nếu máy vốn đã chia nhỏ thì cũng ra 1.
-Đo cả hai, và so **tổng số byte** — phải bằng nhau:
+Đo cả hai, rồi so **tổng số byte** — nhưng cách so phụ thuộc chiến lược:
 
-| | zapret2 chạy | zapret2 dừng |
+| chiến lược | tổng byte có bằng không | vì sao |
 |---|---|---|
-| đoạn đầu | **1 byte** (`head=16` = 0x16, byte đầu ClientHello) | **1424 / 1388 / 1348 byte** (`head=16030106…`) |
-| cách chia | 1 + 1424 + 145 | 1424 + 146 |
-| tổng byte | 1907 / 1920 / 1925 | **1907 / 1920 / 1925** (y hệt) |
+| `multisplit` (chỉ cắt) | **phải bằng** | chỉ **đảo thứ tự** byte, không sinh thêm |
+| `fake` (bơm gói giả) | **phải hơn đúng số byte gói giả** | sinh thêm dữ liệu mới |
 
-Tổng byte bằng nhau mà cách chia khác ⇒ đúng nghĩa desync, không phải mất gói.
+Đo được trên cấu hình hiện tại (`fake` + `multisplit`):
+
+| | zapret2 chạy | zapret2 dừng | phép trừ |
+|---|---|---|---|
+| đoạn đầu | **684 byte** (gói giả) | **1424 / 1388 byte** (`head=16030106…`) | — |
+| số đoạn | 10 / 11 | 8 / 8 | — |
+| tổng byte | 2591 / 2604 | 1907 / 1920 | **+684 cả hai** |
+
+`1907 + 684 = 2591` và `1920 + 684 = 2604` ⇒ luồng thật giữ nguyên từng byte, gói
+giả chỉ là phần cộng thêm. Đây là cách đúng để chứng minh "desync, không phải mất
+gói" **với** chiến lược có bơm gói giả. (Với `multisplit` trần thì tổng phải bằng
+đúng — đừng dùng tiêu chí "bằng" cho mọi chiến lược.)
+
+**Bẫy 2b — đo chiều dài đoạn đầu thì đo nhầm gói giả.** Câu hỏi *"desync có ẩn tên
+miền không?"* không phải *"đoạn đầu dài bao nhiêu"*. Khi có `fake`, đoạn đầu là
+**gói giả**, nên đo chiều dài cho kết luận sai. Bản đầu của bộ đo rơi vào đúng
+bẫy này: thấy `684` thay vì `1` rồi tưởng cấu hình mới hỏng. Cách đúng là **tách
+SNI** trong đoạn đầu (`tests/lab/dpi.py:parse_sni`) và đòi nó khác tên miền thật.
 
 **Bẫy 3 — `dig` là công cụ sai cho địa chỉ NextDNS v6.** `dig @[2a07:a8c0::]`
 báo `couldn't get address for '[2a07:a8c0::]': failure` — đây là `getaddrinfo`
@@ -530,7 +570,8 @@ sửa trực tiếp `/etc/sysctl.d/60-z2d-hardening.conf`. Tầng bảo vệ cò
 | `dig @[2a07:a8c0::]` | `couldn't get address for '[2a07:a8c0::]': failure` — đây là `getaddrinfo` của dig **không** phân tích được literal dạng `::`, **không phải** mạng hỏng | bằng chứng thật: chặn riêng v4 + `ss` thấy `systemd-resolve → [2a07:a8c0::]:853` |
 | `dig -p 853` không kèm `+tls` | gửi DNS **rõ** qua cổng DoT ⇒ NextDNS im lặng ⇒ tưởng đường v6 chết | `dig +tls -p 853 @…` |
 | đo đoạn khi TSO/GSO còn bật | host thấy **một skb lớn** dù trên dây có nhiều đoạn nhỏ ⇒ số đo sai hoàn toàn | `ethtool -K enp8s0 tso off gso off gro off` trước khi đo, và **bật lại** sau khi đo |
-| đo đoạn đầu mà không có nhánh đối chứng | con số đúng một cách ngẫu nhiên cũng có thể ra 1 byte; không chứng minh được gì | đo cả hai nhánh (bật/dừng) và so **tổng byte** — phải bằng nhau |
+| đo đoạn đầu mà không có nhánh đối chứng | con số đúng một cách ngẫu nhiên cũng có thể ra 1 byte; không chứng minh được gì | đo cả hai nhánh (bật/dừng) và so **tổng byte** — phải **bằng** nếu chiến lược chỉ cắt, phải **hơn đúng số byte gói giả** nếu chiến lược bơm gói giả |
+| kết luận "desync có ẩn tên miền" từ chiều dài đoạn đầu | khi có `fake`, đoạn đầu là **gói giả**; đo `684` rồi tưởng hỏng, trong khi `684` mới là bằng chứng đúng | tách **SNI** trong đoạn đầu và đòi nó khác tên miền thật |
 | `grep -cE '…-offload: on'` để xác nhận offload | không khớp `generic-receive-offload` ⇒ báo \"2/3\" trong khi cả 3 đều `on` | liệt kê từng mục bằng `^(tên):` |
 | đếm gói bằng `grep -c 'ip6 daddr …'` | đếm **số dòng khớp**, không phải **counter gói** ⇒ ra 0 và tưởng rule không khớp | đọc `counter packets N` của đúng rule, so trước/sau |
 | regex `\\bb drop\\b` (thừa khoảng trắng) | không khớp `711 drop` ⇒ báo \"0 gói bị chặn\" trong khi thật ra có 12 | viết regex từ **dòng thật** trong `nft list ruleset`, không gõ tay |
