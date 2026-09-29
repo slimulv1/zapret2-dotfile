@@ -168,7 +168,7 @@ def needs_installed():
     return True
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def require_installed(destructive, nd_id):
     """Bảo đảm hệ đang CÀI trước khi chạy test — tiền đề kiện, không phải hành động.
 
@@ -183,7 +183,7 @@ def require_installed(destructive, nd_id):
     return True
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def require_clean(destructive, nd_id):
     """Bảo đảm hệ KHÔNG có gì trước khi chạy test."""
     from qa.host import INSTALL_SH, LONG_TIMEOUT, run

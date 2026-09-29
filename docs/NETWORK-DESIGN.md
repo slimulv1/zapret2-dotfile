@@ -385,6 +385,60 @@ giả thuyết "resolved đọc cache". `ss` mới là bằng chứng quyết đ
 thì domain bị chặn phải fail"* của INV-DESYNC-1 **không kiểm được ở đây**.
 Muốn kiểm phần đó cần lab có DPI giả lập (nft payload match SNI/Host).
 
+**Phát hiện phụ (2026-09-29) — IPv6 tới NextDNS trên 53/udp không dùng được**
+
+Bức tường cho phép `2a07:a8c0:: 53/udp`, nhưng truy vấn tới đúng địa chỉ đó vẫn
+timeout. Đo kỹ để không đoán:
+
+```
+ip6 daddr 2a07:a8c0:: udp dport 53  counter packets 3 → 4   ← tăng
+ip6 daddr 2a07:a8c0:: tcp dport 853 counter packets 2 → 3   ← tăng
+dig +time=4 @2a07:a8c0:: github.com A            → timed out
+dig +time=5 +tls -p 853 @2a07:a8c0:: … github   → status: NOERROR
+```
+
+Counter tăng nghĩa là **rule ufw khớp và gói đã ra khỏi máy**; không có câu trả lời
+là bên kia im lặng. Cùng địa chỉ đó trên **853/DoT thì tốt**. Vì hệ thống bật
+`DNSOverTLS=yes` nên nó đi 853 ⇒ **không ảnh hưởng gì**, chỉ là rule
+`… 53/udp ALLOW` trên IPv6 hiện **chưa bao giờ có tác dụng** trên đường này.
+Giữ rule vẫn đúng (nó đúng khi đường đó dùng được), chỉ là không được dùng.
+
+### 8.1c Phát hiện 2026-09-29 — tắt `ip_forward` làm mất một khoá hardening
+
+Khi dựng lab DPI (netns + veth), sau khi gỡ lab, `t1-config.sh` báo:
+
+```
+LỆCH  khoá sysctl đúng   thực tế=[17] mong đợi=[18]
+```
+
+Truy ra nguyên nhân, và nó **không** nằm ở lab:
+
+```
+net.ipv4.ip_forward=1 → net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.ip_forward=0 → net.ipv4.conf.all.accept_redirects = 1
+```
+
+Lặp lại **3/3 lần** cho cùng kết quả. Khi IPv4 forwarding bị tắt, kernel đặt
+lại nhóm tham số định tuyến về mặc định, và mặc định của `accept_redirects` là
+`1`. Tệp `/etc/sysctl.d/60-z2d-hardening.conf` dòng 43 vẫn ghi `= 0` — tức
+**cấu hình và thực tế đã lệch nhau**.
+
+Ý nghĩa: bất kỳ sự kiện nào tắt/bật IPv4 forwarding — đổi mạng, container,
+`systemd-networkd`, một script nào đó — đều có thể **âm thầm làm yếu tầng 3 đi
+một khoá**. Hiện chỉ có drop-in `ufw.service.d/z2d-reapply-sysctl.conf` nạp lại
+sysctl khi `ufw` khởi động; một sự kiện chỉ đụng `ip_forward` thì không kích
+hoạt drop-in đó.
+
+Cách vô hiệm hóa tạm thời (đã áp dụng trong `tests/lab/setup.sh`): sau khi trả
+`ip_forward` về giá trị cũ, nạp lại tệp hardening.
+
+```
+sysctl -p /etc/sysctl.d/60-z2d-hardening.conf
+```
+
+Còn việc chữa lâu dài (chưa làm, cần chốt hướng) thuộc về câu hỏi: có nên thêm
+một `systemd.path` theo dõi `/proc/sys/net/ipv4/ip_forward` không.
+
 ## 9. Bẫy đo đã dính — ghi lại để không lặp
 | `pacman -Qkk \| grep -c 'modified:'` | Qkk **không** dùng chữ `modified:`, nó ghi `\"... (SHA256 checksum mismatch)\"` ⇒ grep trả **0 giả**, tưởng không tệp nào bị sửa | đếm `grep -c SHA256`, và luôn đối chiếu trực tiếp tệp khi kết luận |
 | `[ -e \"/var/backups/…\" ]` bằng user thường | thư mục `root` 700 ⇒ `[ -e ]` trả **false dù tệp có thật** ⇒ kết luận \"không có trong backup\" | đo bằng `sudo -A test -e` |
@@ -393,6 +447,12 @@ Muốn kiểm phần đó cần lab có DPI giả lập (nft payload match SNI/H
 | đo đoạn khi TSO/GSO còn bật | host thấy **một skb lớn** dù trên dây có nhiều đoạn nhỏ ⇒ số đo sai hoàn toàn | `ethtool -K enp8s0 tso off gso off gro off` trước khi đo, và **bật lại** sau khi đo |
 | đo đoạn đầu mà không có nhánh đối chứng | con số đúng một cách ngẫu nhiên cũng có thể ra 1 byte; không chứng minh được gì | đo cả hai nhánh (bật/dừng) và so **tổng byte** — phải bằng nhau |
 | `grep -cE '…-offload: on'` để xác nhận offload | không khớp `generic-receive-offload` ⇒ báo \"2/3\" trong khi cả 3 đều `on` | liệt kê từng mục bằng `^(tên):` |
+| đếm gói bằng `grep -c 'ip6 daddr …'` | đếm **số dòng khớp**, không phải **counter gói** ⇒ ra 0 và tưởng rule không khớp | đọc `counter packets N` của đúng rule, so trước/sau |
+| regex `\\bb drop\\b` (thừa khoảng trắng) | không khớp `711 drop` ⇒ báo \"0 gói bị chặn\" trong khi thật ra có 12 | viết regex từ **dòng thật** trong `nft list ruleset`, không gõ tay |
+| kết luận \"IPv6 tới NextDNS hỏng\" từ `dig … 53/udp` | gói **đã đi ra** (counter 3→4) nhưng **không ai trả lời**. DoT 853 cùng địa chỉ đó thì `NOERROR` | phân biệt *rule không khớp* với *gói đi được mà bên kia im*; xem counter, đừng chỉ nhìn kết quả `dig` |
+| xoá rule ufw lấy số từ `grep -n` | `grep -n` cho **SỐ DÒNG** của output, không phải **SỐ RULE** ⇒ xoá nhầm 6 rule thật (30 → 14) | lấy từ `[ N ]`: `grep -oE '^\[[ 0-9]+\]' \\| grep -oE '[0-9]+'` |
+| `not {'a': '0'}` để kiểm dọn dẹp | dict có phần tử thì luôn truthy ⇒ teardown **luôn đỏ** dù đã dọn sạch | so **từng giá trị**: `{k: v for k, v in d.items() if v != '0'}` |
+| dựng lab bằng netns mà không nạp lại sysctl | `ip_forward=0` reset `accept_redirects` về 1 ⇒ tầng 3 yếu đi 1 khoá, `t1-config` báo LỆCH 1 | xem §8.1c; luôn `sysctl -p` tệp hardening sau khi trả `ip_forward` |
 
 Đây là phần đáng giá nhất của tài liệu. Mỗi mục là một lỗi đã xảy ra thật và
 đã tốn công tìm.
