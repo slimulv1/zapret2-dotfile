@@ -296,6 +296,22 @@ theo tên miền. Cả hai tự dựng và tự dọn trong `finally`. Cách dù
 | Tệp | Nội dung |
 |---|---|
 | [`docs/NETWORK-DESIGN.md`](docs/NETWORK-DESIGN.md) | Thiết kế chi tiết, kết quả đo, và những chỗ đã biết là chưa ổn |
+| [`docs/CAI-ZAPRET2-GUI-WINDOWS.md`](docs/CAI-ZAPRET2-GUI-WINDOWS.md) | Cài Zapret 2 GUI trên Windows, từ tải tới khi site mở được |
 | [`docs/NGUOI-SUA.md`](docs/NGUOI-SUA.md) | Bẫy cần tránh khi sửa script trong repo này |
 | [`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md) | Ghim DoH cho Firefox và Chromium |
 | [`tests/README.md`](tests/README.md) | Cách chạy khung kiểm thử |
+
+### Tra cứu zapret2 (tổng hợp từ wiki.zapret.moe)
+
+Tám tài liệu, toàn bộ 283 trang wiki.
+
+| Tệp | Nội dung |
+|---|---|
+| [`docs/ZAPRET2-WIKI-TONG-HOP.md`](docs/ZAPRET2-WIKI-TONG-HOP.md) | Lõi `nfqws2`: kiến trúc, pipeline 10 chặng, hợp đồng Lua, profile, filter, fooling |
+| [`docs/WIKI-ZAPRET2-CAU-HINH.md`](docs/WIKI-ZAPRET2-CAU-HINH.md) | Cú pháp thực hành: preset, profile thật, blob, orchestrator `circular` |
+| [`docs/WIKI-DESYNC-PACKET-SO-DO.md`](docs/WIKI-DESYNC-PACKET-SO-DO.md) | Sơ đồ packet từng byte của cả 11 kỹ thuật desync |
+| [`docs/WIKI-ZAPRET1-THAM-CHIEU.md`](docs/WIKI-ZAPRET1-THAM-CHIEU.md) | Zapret 1: cờ `nfqws`, hostlist/ipset/hosts, cài Linux, chẩn đoán |
+| [`docs/WIKI-ZAPRET-NENH-TANG-GAME.md`](docs/WIKI-ZAPRET-NENH-TANG-GAME.md) | Router, Android, Steam, game, `wssize` |
+| [`docs/WIKI-DPI-TSPU.md`](docs/WIKI-DPI-TSPU.md) | DPI и ТСПУ: phễu kiểm tra, bắt DNS 2026, vân tay JA4 |
+| [`docs/WIKI-PROXY-VPN-CONG-CU.md`](docs/WIKI-PROXY-VPN-CONG-CU.md) | Proxy/VPN: xray, VLESS, REALITY, Clash, sing-box, Hysteria |
+| [`docs/WIKI-VAN-DE-AN-TOAN.md`](docs/WIKI-VAN-DE-AN-TOAN.md) | Virus giả, chứng thư НУЦ, root Android, FIDO |
