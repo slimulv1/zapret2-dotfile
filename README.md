@@ -272,6 +272,27 @@ mà chuyển sang public thì chỉ mất vài giây.
 Một chi tiết đáng biết: **key tự lộ ra ID**. Gọi `GET /profiles` với key là ra
 danh sách profile kèm ID, nên lỡ quên ID mà vẫn còn key thì tìm lại được.
 
+## Cập nhật zapret2
+
+```bash
+sudo bash update.sh --check-only     # xem có bản mới không, không đụng gì
+sudo bash update.sh                  # hỏi rồi cài nếu có
+sudo bash update.sh --from master    # cài từ branch (code chưa phát hành)
+```
+
+Hỏi GitHub release mới nhất, nếu có thì build và cài. **`/opt/zapret2/config` và
+hai danh sách user không bao giờ bị mất.**
+
+Ba file đó nằm trong `.gitignore` của zapret2, nên git coi là rác — `git clean -xdf`
+sẽ xoá sạch cả ba. Script này không dùng lệnh đó: nó backup trước, đối chiếu
+SHA256 sau, và khôi phục nếu lệch. Build hỏng thì tự quay lui về đúng commit cũ.
+
+Mỗi lần cài để lại backup ở `/var/backups/zapret2-dotfile/update-<giờ>/`, giữ 5
+bản gần nhất.
+
+> `install.sh` cài MỚI nên `rm -rf /opt/zapret2` rồi clone lại — làm vậy sẽ mất
+> config. `update.sh` không `rm -rf`, chỉ `git checkout` sang tag mới.
+
 ## Kiểm thử
 
 Khung pytest nằm ở `tests/`, chạy được ngay trên máy thật:
