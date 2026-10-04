@@ -28,6 +28,26 @@ chk() {
 }
 skip() { printf '  %sBỎ%s    %-36s %s\n' "$Y" "$N" "$1" "$2"; N_SKIP=$((N_SKIP+1)); }
 
+# nd_stray / nd_stray_link_dns — CÓ CHỦ Ý viết lại, KHÔNG gọi sang install.sh.
+# Xem giải thích ở đầu tệp: dùng chung hàm thì installer sai thì bộ kiểm cũng
+# sai theo. Ở đây còn thêm một lý do: install.sh đã đổi cách đo, nếu t1 lấy lại
+# hàm cũ thì t1 kiểm một thứ khác — đúng việc cần làm, nhưng dễ bị hiểu là
+# "t1 còn ý cũ". Hai bên cùng soát một câu hỏi ("link nào còn DNS lạ") bằng hai
+# bản cài độc lập thì vẫn bắt được lỗi của cả hai.
+#
+# BẪY THỨ TỰ: tách khoảng trắng TRƯỚC rồi mới cắt hậu tố "#<ID>.dns.nextdns.io".
+# Ngược lại `sed 's/#.*//'` ăn từ # đầu tiên trở đi trên CẢ DÒNG, mà
+# `resolvectl dns` in nhiều địa chỉ trên một dòng ⇒ các địa chỉ lạ phía sau
+# biến mất và báo đạt giả.
+nd_stray() {
+  local want
+  want=$(printf '%s\n' $ND_V4 $ND_V6)
+  tr ' \t' '\n\n' | sed 's/#.*//' | grep -v '^$' | grep -vxF "$want" | paste -sd, -
+}
+nd_stray_link_dns() {
+  resolvectl dns 2>/dev/null | sed -n 's/^Link [0-9][0-9]* (.*): *//p' | nd_stray
+}
+
 for c in nft systemctl ufw; do command -v "$c" >/dev/null || { echo "thiếu lệnh: $c"; exit 2; }; done
 [ -d "$ZAPRET_DIR" ] || { echo "chưa có zapret2 ở $ZAPRET_DIR"; exit 2; }
 
@@ -72,7 +92,14 @@ chk "nft: rule IPv6 dport"     "$(nft list table inet zapret2 2>/dev/null | grep
 chk "nft: không lọc cổng DNS" "$(nft list table inet zapret2 2>/dev/null | grep -cE 'dport (53|853)\b')" 0
 
 printf '\n%s── TẦNG 2 — NextDNS qua DoT (tầng quyết định chặn) ──%s\n' "$N" "$N"
-chk "số nameserver đang dùng"  "$(grep -c '^nameserver' /run/systemd/resolve/resolv.conf 2>/dev/null)" 4
+# Bản đầu đếm MỌI dòng `^nameserver` trong tệp uplink rồi kỳ vọng 4. Tệp đó GỘP
+# cả DNS global lẫn DNS per-link do NetworkManager đẩy vào, nên chỉ cần wifi
+# còn sót DNS của router là thành 5 ⇒ LỆCH giả dù 3 tầng chạy đúng. Đo được:
+# 4 NextDNS + 192.168.31.1.
+# Nên đo đúng thứ: link nào còn giữ DNS KHÔNG phải NextDNS thì nêu TÊN ĐỊA CHỈ.
+# (Số 4 của global thì đã có sẵn ở hàng "mọi DNS đều có #ID" bên dưới — không
+# thêm lần nữa, trùng lặp chỉ làm dài bảng.)
+chk "link không DNS lạ"        "$(nd_stray_link_dns | sed 's/^$/sạch/')" "sạch"
 chk "DoT bật"                  "$(grep -c '^DNSOverTLS=yes' /etc/systemd/resolved.conf 2>/dev/null)" 1
 chk "LLMNR tắt"                "$(grep -c '^LLMNR=no' /etc/systemd/resolved.conf 2>/dev/null)" 1
 chk "mDNS tắt"                 "$(grep -c '^MulticastDNS=no' /etc/systemd/resolved.conf 2>/dev/null)" 1

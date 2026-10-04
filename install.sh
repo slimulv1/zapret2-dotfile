@@ -1484,6 +1484,35 @@ else
 fi
 
 # =============================================================================
+#  nd_stray / nd_stray_link_dns — dùng ở bước KIỂM CHỨNG CUỐI
+#
+#  nd_stray: đọc danh sách địa chỉ từ stdin (một địa chỉ mỗi dòng, có thể
+#  kèm hậu tố "#<ID>.dns.nextdns.io") và in ra những cái KHÔNG thuộc 4 IP
+#  NextDNS. Rỗng = không có địa chỉ lạ.
+#
+#  nd_stray_link_dns: áp nd_stray cho DNS per-link của systemd-resolved.
+#  `resolvectl dns` in "Link N (tên): <danh sách>" và bỏ dòng Global.
+#  "Link 2 (enp8s0):" không địa chỉ nào ⇒ dòng rỗng ⇒ không sinh rác.
+# =============================================================================
+nd_stray() {
+  local want
+  want=$(printf '%s\n' $ND_V4 $ND_V6)
+  # THỨ TỰ QUAN TRỌNG: tách khoảng trắng TRƯỚC rồi mới cắt hậu tố "#<ID>...".
+  # Ngược lại `sed 's/#.*//'` ăn từ dấu # đầu tiên trở đi trên CẢ DÒNG —
+  # `resolvectl dns` in nhiều địa chỉ trên một dòng, nên
+  #   "Link 2 (eth0): 1.1.1.1#abc.dns.nextdns.io 192.168.1.1 8.8.8.8"
+  # bị cắt còn "1.1.1.1" ⇒ hai địa chỉ lạ sau đó biến mất, báo đạt giả.
+  #
+  # Hàm CỐ TÌNH trả về 1 khi không có địa chỉ lạ (grep -vxF không khớp gì).
+  # Đó là "không có gì để báo", không phải lỗi — nơi gọi phải `|| true`.
+  tr ' \t' '\n\n' | sed 's/#.*//' | grep -v '^$' | grep -vxF "$want" | paste -sd, -
+}
+nd_stray_link_dns() {
+  resolvectl dns 2>/dev/null \
+    | sed -n 's/^Link [0-9][0-9]* (.*): *//p' | nd_stray
+}
+
+# =============================================================================
 step "8/8 · KIỂM CHỨNG CUỐI"
 # --dry DỪNG Ở ĐÂY, nhưng KHÔNG thoát: còn phải chạy tới khối in kết quả
 # cuối file để in "XEM XONG" và gợi ý câu lệnh chạy thật.
@@ -1540,7 +1569,44 @@ chk "tiến trình nfqws2"   "$(pgrep -c nfqws2 || true)" 1
 chk "MODE_FILTER"         "$(grep -oP '^MODE_FILTER=\K.*' "$ZAPRET_DIR/config")" hostlist
 chk "danh sách user rỗng" "$(grep -cvE '^\s*(#|$)' "$ZAPRET_DIR/ipset/zapret-hosts-user.txt" || true)" 0
 chk "số dải exclude"      "$(grep -cvE '^\s*(#|$)' "$ZAPRET_DIR/ipset/zapret-hosts-user-exclude.txt" || true)" 9
-chk "nameserver"          "$(grep -c '^nameserver' /run/systemd/resolve/resolv.conf)" 4
+
+# ---- DNS: hai mục thay cho MỘT mục cũ ----
+#
+#   Mục cũ: chk "nameserver" $(grep -c '^nameserver' /run/systemd/resolve/resolv.conf) 4
+#
+#   SAI Ở ĐÂY: tệp đó là tệp UPLINK của systemd-resolved, nó GỘP cả DNS global
+#   lẫn DNS per-link do NetworkManager đẩy vào — không phải danh sách 4 địa
+#   chỉ NextDNS. Đo được 5 dòng trên máy thật (4 NextDNS + 192.168.31.1 của
+#   router) ⇒ báo LỆCH "5 vs 4" trong khi cả 3 tầng đang chạy đúng.
+#
+#   DNS ROUTER LỚT VÀO VÌ SAO: `ipv4.ignore-auto-dns=yes` CHỈ được
+#   NetworkManager đọc lúc KÍCH HOẠT kết nối. Bước 5 ghi nó vào profile (đúng)
+#   nhưng wifi đã nối sẵn từ trước, và `nmcli device reapply` phía sau KHÔNG
+#   đọc lại khoá này (reapply chỉ nạp lại metric/route). Đo được: profile
+#   `nothing` đã có yes/yes mà `resolvectl dns` vẫn ra 192.168.31.1 cho wlan0.
+#
+#   HẬU QUẢ CÒN LẠI: nhẹ, KHÔNG mất lọc — tường DNS ở bước 6 DROP mọi 53/853
+#   không trỏ về 4 IP NextDNS nên 192.168.31.1:53 bị chặn và resolved quay về
+#   NextDNS. Mất là ĐỘ TRỄ (đo 385ms cho example.com vì một vòng hỏi thừa).
+#   Nhưng nếu sau này ai đó nới tường thì DNS chạy qua router là KHÔNG lọc —
+#   nên vẫn phải kiểm, chỉ là phải kiểm đúng thứ.
+#
+#   Tách làm hai: (1) không link nào giữ DNS lạ; (2) vẫn đủ 4 NextDNS trong
+#   uplink. Bỏ (2) thì mất bằng chứng resolved đã NHẬN cấu hình — check (1)
+#   vẫn đạt khi resolved chưa nạp gì hết.
+#
+#   In DANH SÁCH chứ không in số đếm: lệch mà chỉ thấy "5 vs 4" thì phải tự đi
+#   tìm dòng thừa; thấy thẳng "192.168.31.1" thì biết ngay.
+stray_link=$(nd_stray_link_dns || true)
+chk "link không DNS lạ"   "${stray_link:-sạch}" "sạch"
+uplink=/run/systemd/resolve/resolv.conf
+# BẪY: `printf '%s' $ND_V4 $ND_V6` KHÔNG chèn dấu cách giữa các đối số (chỉ làm
+# vậy với `%s%s...` hoặc khi đã ghi \n) ⇒ ra một chuỗi dính liền
+# "45.90.28.045.90.30.0..." rồi `tr ' ' '|'` không có gì để đổi ⇒ regex thành
+# một chuỗi vô nghĩa ⇒ đếm ra 0 và báo LỆCH giả. Phải `%s\n` rồi `paste -sd'|'`.
+nd_re=$(printf '%s\n' $ND_V4 $ND_V6 | paste -sd'|' -)
+chk "uplink đủ NextDNS"    "$(sed -n 's/^nameserver[[:space:]]\+//p' "$uplink" 2>/dev/null \
+                             | grep -cE "^($nd_re)$" || true)" 4
 
   # DoT: kiểm KẾT NỐI THẬT, không chỉ đọc tệp.
   #
