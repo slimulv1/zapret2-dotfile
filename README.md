@@ -58,6 +58,30 @@ Chặn ở đây thuộc kiểu **DNS**, không phải kiểu DPI. Tắt hẳn z
 trọn vẹn: đường truyền không có bộ lọc nào cả. Nói cách khác, thứ thật
 sự chặn trang chính là câu trả lời của NextDNS ở bước [1].
 
+## Đo trước: đường của bạn có DPI không?
+
+Trước khi cài zapret2 ở đâu — kể cả Windows — **đo xem nhà mạng có thực sự lọc nội dung
+gói tin không**:
+
+```bash
+# Linux
+bash do-thu-dpi.sh
+
+# Windows
+powershell -ExecutionPolicy Bypass -File do-thu-dpi.ps1
+```
+
+Cách đo: lấy IP từ DoH, rồi `curl --resolve` — **ép IP nhưng giữ nguyên SNI**, bỏ qua
+hoàn toàn DNS máy.
+
+- Lên bình thường ⇒ **không có chặn SNI/DPI**. Chặn nằm ở tầng DNS ⇒ zapret2 **vô dụng**,
+  cần lớp DNS mã hóa (NextDNS/DoH) — cái đó chạy được trên mọi nhà mạng cùng lúc.
+- Vẫn hỏng ⇒ **có DPI**. Lúc này zapret2 mới có việc để làm.
+
+Trên đường FPT đo ngày 2026-10-11, kết quả là **không có chặn SNI/DPI** — kể cả với
+hai domain NextDNS đang chặn. Chi tiết ở
+[docs/CAI-ZAPRET2-WINDOWS-11.md](docs/CAI-ZAPRET2-WINDOWS-11.md) mục 0.
+
 ## Đã đo được gì
 
 Mỗi tầng đều có phép đo, không phải lời hứa:
@@ -317,6 +341,7 @@ theo tên miền. Cả hai tự dựng và tự dọn trong `finally`. Cách dù
 | Tệp | Nội dung |
 |---|---|
 | [`docs/NETWORK-DESIGN.md`](docs/NETWORK-DESIGN.md) | Thiết kế chi tiết, kết quả đo, và những chỗ đã biết là chưa ổn |
+| [`docs/CAI-ZAPRET2-WINDOWS-11.md`](docs/CAI-ZAPRET2-WINDOWS-11.md) | **Windows 11, đào sâu từ wiki**: đo DPI trước, TCP timestamps, 5 chế độ WinDivert, profile, đọc log |
 | [`docs/CAI-ZAPRET2-GUI-WINDOWS.md`](docs/CAI-ZAPRET2-GUI-WINDOWS.md) | Cài Zapret 2 GUI trên Windows, từ tải tới khi site mở được |
 | [`docs/NGUOI-SUA.md`](docs/NGUOI-SUA.md) | Bẫy cần tránh khi sửa script trong repo này |
 | [`docs/tinh-chinh-trinh-duyet.md`](docs/tinh-chinh-trinh-duyet.md) | Ghim DoH cho Firefox và Chromium |
